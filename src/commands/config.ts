@@ -2,25 +2,11 @@
  * grhs config show — Print resolved configuration
  */
 
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command } from "commander";
-
-const DEFAULT_CONFIG = {
-	poll_interval_minutes: 10,
-	daily_cap: 5,
-	dispatch: {
-		capability: "lead",
-		max_concurrent: 2,
-		monitor_interval_seconds: 30,
-		run_timeout_minutes: 60,
-	},
-	shipping: {
-		auto_push: true,
-		pr_template:
-			"## Greenhouse Auto-PR\n\n**GitHub Issue:** #{github_issue_number}\n**Seeds Task:** {seeds_task_id}\n",
-	},
-};
+import { loadConfig } from "../config.ts";
+import { outputJson, printError } from "../output.ts";
+import type { DaemonConfig } from "../types.ts";
 
 export function registerConfigCommand(program: Command): void {
 	const configCmd = program.command("config").description("Configuration commands");
@@ -30,39 +16,48 @@ export function registerConfigCommand(program: Command): void {
 		.description("Print resolved configuration")
 		.option("--config <path>", "Config file path", ".greenhouse/config.yaml")
 		.option("--json", "Output as JSON")
-		.action((opts: { config: string; json?: boolean }) => {
+		.action(async (opts: { config: string; json?: boolean }) => {
 			const useJson = opts.json ?? (program.opts() as { json?: boolean }).json ?? false;
 			const configPath = join(process.cwd(), opts.config);
 
-			if (!existsSync(configPath)) {
+			let config: DaemonConfig;
+			try {
+				config = await loadConfig(configPath);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
 				if (useJson) {
-					process.stdout.write(
-						`${JSON.stringify({ success: false, error: `Config not found: ${configPath}` })}\n`,
-					);
+					outputJson({ success: false, error: msg });
 				} else {
-					process.stderr.write(`Config not found: ${configPath}\n`);
-					process.stderr.write("Run 'grhs init' to create a config.\n");
+					printError(msg);
 				}
 				process.exitCode = 1;
 				return;
 			}
 
-			const raw = readFileSync(configPath, "utf-8");
-
 			if (useJson) {
-				// Parse YAML manually using the yaml package at runtime
-				// For now emit raw text wrapped in JSON
-				process.stdout.write(`${JSON.stringify({ success: true, configPath, raw })}\n`);
+				outputJson({ success: true, configPath, config });
 				return;
 			}
 
 			process.stdout.write(`# Resolved config: ${configPath}\n\n`);
-			process.stdout.write(raw);
-			process.stdout.write("\n# Defaults applied for missing fields:\n");
-			process.stdout.write(`#   poll_interval_minutes: ${DEFAULT_CONFIG.poll_interval_minutes}\n`);
-			process.stdout.write(`#   daily_cap: ${DEFAULT_CONFIG.daily_cap}\n`);
+			process.stdout.write(`version: ${config.version}\n`);
+			process.stdout.write(`poll_interval_minutes: ${config.poll_interval_minutes}\n`);
+			process.stdout.write(`daily_cap: ${config.daily_cap}\n`);
+			process.stdout.write(`\nrepos:\n`);
+			for (const repo of config.repos) {
+				process.stdout.write(`  - owner: ${repo.owner}\n`);
+				process.stdout.write(`    repo: ${repo.repo}\n`);
+				process.stdout.write(`    labels: [${repo.labels.join(", ")}]\n`);
+				process.stdout.write(`    project_root: ${repo.project_root}\n`);
+			}
+			process.stdout.write(`\ndispatch:\n`);
+			process.stdout.write(`  capability: ${config.dispatch.capability}\n`);
+			process.stdout.write(`  max_concurrent: ${config.dispatch.max_concurrent}\n`);
 			process.stdout.write(
-				`#   dispatch.max_concurrent: ${DEFAULT_CONFIG.dispatch.max_concurrent}\n`,
+				`  monitor_interval_seconds: ${config.dispatch.monitor_interval_seconds}\n`,
 			);
+			process.stdout.write(`  run_timeout_minutes: ${config.dispatch.run_timeout_minutes}\n`);
+			process.stdout.write(`\nshipping:\n`);
+			process.stdout.write(`  auto_push: ${config.shipping.auto_push}\n`);
 		});
 }
