@@ -36,11 +36,16 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 							seedsId: run.seedsId,
 							ghIssueId: run.ghIssueId,
 						});
-						await updateRun(projectRoot, run, {
-							status: "failed",
-							error: "run timeout exceeded",
-							retryable: true,
-						});
+						await updateRun(
+							run.ghIssueId,
+							run.ghRepo,
+							{
+								status: "failed",
+								error: "run timeout exceeded",
+								retryable: true,
+							},
+							projectRoot,
+						);
 						continue;
 					}
 
@@ -49,10 +54,15 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 					log("debug", "Run status", { seedsId: run.seedsId, state });
 
 					if (completed) {
-						const updated = await updateRun(projectRoot, run, {
-							status: "shipping",
-							completedAt: new Date().toISOString(),
-						});
+						const updated = await updateRun(
+							run.ghIssueId,
+							run.ghRepo,
+							{
+								status: "shipping",
+								completedAt: new Date().toISOString(),
+							},
+							projectRoot,
+						);
 						await advanceShipping(updated, repo, config, projectRoot, exec);
 					}
 				} else if (run.status === "shipping") {
@@ -78,23 +88,33 @@ async function advanceShipping(
 ): Promise<void> {
 	try {
 		const { prUrl, prNumber } = await shipRun(run, repo, config, exec);
-		await updateRun(projectRoot, run, {
-			status: "shipped",
-			prUrl,
-			prNumber,
-			shippedAt: new Date().toISOString(),
-		});
+		await updateRun(
+			run.ghIssueId,
+			run.ghRepo,
+			{
+				status: "shipped",
+				prUrl,
+				prNumber,
+				shippedAt: new Date().toISOString(),
+			},
+			projectRoot,
+		);
 		log("info", "Run shipped", { seedsId: run.seedsId, prUrl });
 	} catch (err) {
 		log("error", "Shipping failed", {
 			seedsId: run.seedsId,
 			error: err instanceof Error ? err.message : String(err),
 		});
-		await updateRun(projectRoot, run, {
-			status: "failed",
-			error: err instanceof Error ? err.message : String(err),
-			retryable: true,
-		});
+		await updateRun(
+			run.ghIssueId,
+			run.ghRepo,
+			{
+				status: "failed",
+				error: err instanceof Error ? err.message : String(err),
+				retryable: true,
+			},
+			projectRoot,
+		);
 	}
 }
 
@@ -173,7 +193,7 @@ export async function runPollCycle(
 					ingestedAt: now,
 					updatedAt: now,
 				};
-				await appendRun(projectRoot, ingestedRun);
+				await appendRun(ingestedRun, projectRoot);
 				log("info", "Issue ingested", { ghIssueId: issue.number, seedsId });
 
 				// Dispatch: ov sling
@@ -186,7 +206,7 @@ export async function runPollCycle(
 					dispatchedAt: now,
 					updatedAt: now,
 				};
-				await appendRun(projectRoot, runningRun);
+				await appendRun(runningRun, projectRoot);
 				log("info", "Run dispatched", { seedsId: taskId, agentName, branch });
 
 				budget.consume();
@@ -203,7 +223,7 @@ export async function runPollCycle(
 					retryable: false,
 					updatedAt: now,
 				};
-				await appendRun(projectRoot, failedRun);
+				await appendRun(failedRun, projectRoot);
 			}
 		}
 	}
