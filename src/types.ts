@@ -1,0 +1,145 @@
+// === GitHub Types ===
+
+export interface GhLabel {
+	name: string;
+}
+
+export interface GhIssue {
+	number: number;
+	title: string;
+	body: string;
+	labels: GhLabel[];
+	assignees: Array<{ login: string }>;
+}
+
+// === Run State ===
+
+export type RunStatus = "pending" | "ingested" | "running" | "shipping" | "shipped" | "failed";
+
+export interface RunState {
+	// GitHub source
+	ghIssueId: number;
+	ghRepo: string; // "owner/repo"
+	ghTitle: string;
+	ghLabels: string[];
+
+	// Seeds mapping
+	seedsId: string;
+
+	// Lifecycle
+	status: RunStatus;
+	error?: string;
+	retryable?: boolean;
+
+	// Overstory
+	agentName?: string;
+	branch?: string;
+
+	// Shipping
+	prUrl?: string;
+	prNumber?: number;
+
+	// Timestamps
+	discoveredAt: string;
+	ingestedAt?: string;
+	dispatchedAt?: string;
+	completedAt?: string;
+	shippedAt?: string;
+	updatedAt: string;
+}
+
+// === Config Types ===
+
+export interface RepoConfig {
+	owner: string;
+	repo: string;
+	labels: string[];
+	project_root: string;
+}
+
+export interface DaemonConfig {
+	version: string;
+	repos: RepoConfig[];
+	poll_interval_minutes: number;
+	daily_cap: number;
+	dispatch: {
+		capability: string;
+		max_concurrent: number;
+		monitor_interval_seconds: number;
+		run_timeout_minutes: number;
+	};
+	shipping: {
+		auto_push: boolean;
+		pr_template: string;
+	};
+}
+
+// === Budget ===
+
+export interface DailyBudget {
+	date: string; // YYYY-MM-DD
+	dispatched: number;
+	cap: number;
+	remaining: number;
+}
+
+// === Subprocess Abstraction ===
+
+export interface ExecResult {
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+}
+
+export type ExecFn = (cmd: string[], opts?: { cwd?: string }) => Promise<ExecResult>;
+
+// === ov sling --json response ===
+
+export interface SlingResult {
+	success: boolean;
+	command: string;
+	agentName: string;
+	capability: string;
+	taskId: string;
+	branch: string;
+	worktree: string;
+	tmuxSession: string;
+	pid: number;
+}
+
+// === ov status --json response ===
+
+export interface AgentStatus {
+	agentName: string;
+	capability: string;
+	taskId: string;
+	branch: string;
+	state: "booting" | "working" | "completed" | "stalled" | "zombie";
+}
+
+export interface StatusResult {
+	success: boolean;
+	command: string;
+	currentRunId: string | null;
+	agents: AgentStatus[];
+	worktrees: Array<{ path: string; branch: string; head: string }>;
+	tmuxSessions: Array<{ name: string; pid: number }>;
+	unreadMailCount: number;
+	mergeQueueCount: number;
+	recentMetricsCount: number;
+}
+
+// === sd create --json response ===
+
+export interface SdCreateResult {
+	success: boolean;
+	command: string;
+	id: string;
+}
+
+// === Shipping ===
+
+export interface ShipResult {
+	prUrl: string;
+	prNumber: number;
+}
