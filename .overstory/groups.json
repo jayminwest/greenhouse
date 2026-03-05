@@ -1,0 +1,15 @@
+[
+	{
+		"id": "group-a7d09017",
+		"name": "greenhouse-build",
+		"memberIssueIds": [
+			"greenhouse-2ca2",
+			"greenhouse-3aaa",
+			"greenhouse-8139",
+			"greenhouse-d36d"
+		],
+		"status": "active",
+		"createdAt": "2026-03-05T22:43:44.378Z",
+		"completedAt": null
+	}
+]

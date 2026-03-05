@@ -2,7 +2,7 @@
 # See: https://github.com/overstory/overstory
 
 project:
-  name: os-eco
+  name: greenhouse
   root: /Users/jayminwest/Projects/os-eco/greenhouse
   canonicalBranch: main
   qualityGates:
