@@ -1,0 +1,54 @@
+{
+	"name": "@os-eco/greenhouse-cli",
+	"version": "0.1.0",
+	"description": "Autonomous development daemon for AI agent workflows — polls GitHub, dispatches overstory runs, opens PRs.",
+	"author": "Jaymin West",
+	"license": "MIT",
+	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/jayminwest/greenhouse.git"
+	},
+	"homepage": "https://github.com/jayminwest/greenhouse",
+	"keywords": [
+		"ai",
+		"agents",
+		"automation",
+		"github",
+		"overstory",
+		"cli",
+		"developer-tools"
+	],
+	"bin": {
+		"greenhouse": "./src/cli.ts",
+		"grhs": "./src/cli.ts"
+	},
+	"main": "src/cli.ts",
+	"files": [
+		"src"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"engines": {
+		"bun": ">=1.0"
+	},
+	"scripts": {
+		"dev": "bun run src/cli.ts",
+		"lint": "biome check src/",
+		"lint:fix": "biome check --write src/",
+		"typecheck": "tsc --noEmit",
+		"test": "bun test",
+		"version:bump": "bun scripts/version-bump.ts"
+	},
+	"dependencies": {
+		"chalk": "^5.4.1",
+		"commander": "^13.1.0",
+		"yaml": "^2.7.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@types/bun": "^1.2.4",
+		"typescript": "^5.7.3"
+	}
+}
