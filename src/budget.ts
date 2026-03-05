@@ -1,4 +1,5 @@
-import type { DailyBudget } from "./types.ts";
+import { readAllRuns } from "./state.ts";
+import type { DailyBudget, RunState } from "./types.ts";
 
 function todayStr(): string {
 	return new Date().toISOString().slice(0, 10);
@@ -46,4 +47,35 @@ export class BudgetTracker {
 			this.dispatched = 0;
 		}
 	}
+}
+
+/**
+ * Compute budget from a list of runs (synchronous).
+ */
+export function computeBudget(runs: RunState[], cap: number): DailyBudget {
+	const today = todayStr();
+	const dispatched = runs.filter(
+		(r) => r.dispatchedAt && r.dispatchedAt.slice(0, 10) === today,
+	).length;
+	return {
+		date: today,
+		dispatched,
+		cap,
+		remaining: Math.max(0, cap - dispatched),
+	};
+}
+
+/**
+ * Check if a budget is exhausted (remaining === 0).
+ */
+export function budgetExhausted(budget: DailyBudget): boolean {
+	return budget.remaining <= 0;
+}
+
+/**
+ * Read state and compute the daily budget (async).
+ */
+export async function getDailyBudget(cap: number, projectRoot: string): Promise<DailyBudget> {
+	const runs = await readAllRuns(projectRoot);
+	return computeBudget(runs, cap);
 }

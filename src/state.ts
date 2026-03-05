@@ -1,5 +1,5 @@
-import { appendFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { RunState, RunStatus } from "./types.ts";
 
 const STATE_FILE = ".greenhouse/state.jsonl";
@@ -33,12 +33,27 @@ export async function readAllRuns(projectRoot: string): Promise<RunState[]> {
 	return Array.from(map.values());
 }
 
+/** Alias for readAllRuns (foundation API). */
+export const readState = readAllRuns;
+
 /**
  * Append a run state entry to state.jsonl (append-only log).
+ * Args: (run, projectRoot) — run first, projectRoot second.
  */
-export async function appendRun(projectRoot: string, run: RunState): Promise<void> {
+export async function appendRun(run: RunState, projectRoot: string): Promise<void> {
 	const statePath = join(projectRoot, STATE_FILE);
+	await mkdir(dirname(statePath), { recursive: true });
 	await appendFile(statePath, `${JSON.stringify(run)}\n`);
+}
+
+/**
+ * Overwrite state.jsonl entirely with the given run list.
+ */
+export async function writeAllRuns(runs: RunState[], projectRoot: string): Promise<void> {
+	const statePath = join(projectRoot, STATE_FILE);
+	await mkdir(dirname(statePath), { recursive: true });
+	const content = runs.map((r) => JSON.stringify(r)).join("\n") + (runs.length > 0 ? "\n" : "");
+	await writeFile(statePath, content);
 }
 
 /**
@@ -68,19 +83,26 @@ export async function getRunByIssue(
 }
 
 /**
- * Update the status of a run (appends new entry; dedup on read).
+ * Update the status of a run by (ghIssueId, ghRepo). Throws if not found.
+ * Args: (ghIssueId, ghRepo, updates, projectRoot)
  */
 export async function updateRun(
-	projectRoot: string,
-	run: RunState,
+	ghIssueId: number,
+	ghRepo: string,
 	updates: Partial<RunState> & { status: RunStatus },
+	projectRoot: string,
 ): Promise<RunState> {
+	const runs = await readAllRuns(projectRoot);
+	const run = runs.find((r) => r.ghRepo === ghRepo && r.ghIssueId === ghIssueId);
+	if (!run) {
+		throw new Error(`No run found for ${ghRepo}#${ghIssueId}`);
+	}
 	const updated: RunState = {
 		...run,
 		...updates,
 		updatedAt: new Date().toISOString(),
 	};
-	await appendRun(projectRoot, updated);
+	await appendRun(updated, projectRoot);
 	return updated;
 }
 

@@ -7,20 +7,18 @@
  */
 
 import { Command } from "commander";
+import { registerBudgetCommand } from "./commands/budget.ts";
 import { registerConfigCommand } from "./commands/config.ts";
 import { registerDoctorCommand } from "./commands/doctor.ts";
+import { registerIngestCommand } from "./commands/ingest.ts";
 import { registerInitCommand } from "./commands/init.ts";
+import { registerLogsCommand } from "./commands/logs.ts";
+import { registerPollCommand } from "./commands/poll.ts";
+import { registerRunsCommand } from "./commands/runs.ts";
+import { registerShipCommand } from "./commands/ship.ts";
 import { registerStartCommand } from "./commands/start.ts";
 import { registerStatusCommand } from "./commands/status.ts";
 import { registerStopCommand } from "./commands/stop.ts";
-
-// TODO: uncomment when build-cli-ops agent delivers these files:
-// import { registerRunsCommand } from "./commands/runs.ts";
-// import { registerPollCommand } from "./commands/poll.ts";
-// import { registerIngestCommand } from "./commands/ingest.ts";
-// import { registerShipCommand } from "./commands/ship.ts";
-// import { registerLogsCommand } from "./commands/logs.ts";
-// import { registerBudgetCommand } from "./commands/budget.ts";
 
 export const VERSION = "0.1.0";
 
@@ -58,13 +56,12 @@ registerInitCommand(program);
 registerConfigCommand(program);
 registerDoctorCommand(program);
 
-// TODO: register when build-cli-ops delivers:
-// registerRunsCommand(program);
-// registerPollCommand(program);
-// registerIngestCommand(program);
-// registerShipCommand(program);
-// registerLogsCommand(program);
-// registerBudgetCommand(program);
+registerRunsCommand(program);
+registerPollCommand(program);
+registerIngestCommand(program);
+registerShipCommand(program);
+registerLogsCommand(program);
+registerBudgetCommand(program);
 
 // Unknown command handler
 program.on("command:*", (operands: string[]) => {
