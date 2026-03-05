@@ -1,4 +1,5 @@
 import { BudgetTracker } from "./budget.ts";
+import { loadConfig } from "./config.ts";
 import { dispatchRun } from "./dispatcher.ts";
 import { defaultExec } from "./exec.ts";
 import { ingestIssue } from "./ingester.ts";
@@ -243,8 +244,10 @@ export async function getRunsSummary(config: DaemonConfig): Promise<RunState[]> 
 
 /**
  * Main daemon loop. Runs until signal received.
+ * @param config - Initial daemon configuration.
+ * @param configPath - Optional path to config file; used for SIGHUP reload.
  */
-export async function runDaemon(config: DaemonConfig): Promise<void> {
+export async function runDaemon(config: DaemonConfig, configPath?: string): Promise<void> {
 	log("info", "Greenhouse daemon starting", {
 		repos: config.repos.map((r) => `${r.owner}/${r.repo}`),
 		poll_interval_minutes: config.poll_interval_minutes,
@@ -252,18 +255,33 @@ export async function runDaemon(config: DaemonConfig): Promise<void> {
 	});
 
 	let running = true;
+	let currentConfig = config;
 
 	const shutdown = () => {
 		log("info", "Shutdown signal received, finishing current cycle");
 		running = false;
 	};
 
+	const reloadConfig = () => {
+		loadConfig(configPath)
+			.then((newConfig) => {
+				currentConfig = newConfig;
+				log("info", "Config reloaded via SIGHUP");
+			})
+			.catch((err: unknown) => {
+				log("error", "Failed to reload config on SIGHUP", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
+	};
+
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
+	process.on("SIGHUP", reloadConfig);
 
 	while (running) {
 		try {
-			await runPollCycle(config);
+			await runPollCycle(currentConfig);
 		} catch (err) {
 			log("error", "Poll cycle error", {
 				error: err instanceof Error ? err.message : String(err),
@@ -272,7 +290,7 @@ export async function runDaemon(config: DaemonConfig): Promise<void> {
 
 		if (!running) break;
 
-		const sleepMs = config.poll_interval_minutes * 60 * 1000;
+		const sleepMs = currentConfig.poll_interval_minutes * 60 * 1000;
 		log("info", "Sleeping until next poll", {
 			next_poll_in_minutes: config.poll_interval_minutes,
 		});
