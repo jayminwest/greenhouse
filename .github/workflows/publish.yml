@@ -1,0 +1,99 @@
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - run: bun install
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun test
+
+      - name: Check if version changed
+        id: version-check
+        run: |
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          NPM_VERSION=$(npm view @os-eco/greenhouse-cli version 2>/dev/null || echo "0.0.0")
+          if [ "$LOCAL_VERSION" = "$NPM_VERSION" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Version $LOCAL_VERSION already published, skipping."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
+            echo "Publishing $LOCAL_VERSION (npm has $NPM_VERSION)."
+          fi
+
+      - name: Verify version sync
+        if: steps.version-check.outputs.publish == 'true'
+        run: |
+          PKG_VERSION="${{ steps.version-check.outputs.version }}"
+          SRC_VERSION=$(grep -oP 'const VERSION = "\K[^"]+' src/cli.ts)
+          if [ "$PKG_VERSION" != "$SRC_VERSION" ]; then
+            echo "::error::Version mismatch! package.json=$PKG_VERSION src/cli.ts=$SRC_VERSION"
+            exit 1
+          fi
+
+      - name: Tag release
+        if: steps.version-check.outputs.publish == 'true'
+        run: |
+          VERSION="${{ steps.version-check.outputs.version }}"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: Publish to npm
+        if: steps.version-check.outputs.publish == 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          bunx npm publish --access public
+
+      - name: Extract changelog notes
+        if: steps.version-check.outputs.publish == 'true'
+        id: changelog
+        run: |
+          VERSION="${{ steps.version-check.outputs.version }}"
+          NOTES=$(awk '/^## \['"$VERSION"'\]/{found=1; next} found && /^## \[/{exit} found{print}' CHANGELOG.md)
+          NOTES=$(echo "$NOTES" | awk 'NF{found=1} found{lines[++n]=$0} END{while(n>0 && lines[n]=="") n--; for(i=1;i<=n;i++) print lines[i]}')
+          if [ -n "$NOTES" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "$NOTES" > /tmp/release-notes.md
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "Warning: No CHANGELOG entry found for $VERSION"
+          fi
+
+      - name: Create GitHub release
+        if: steps.version-check.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version-check.outputs.version }}"
+          if [ "${{ steps.changelog.outputs.found }}" = "true" ]; then
+            gh release create "v$VERSION" \
+              --title "v$VERSION" \
+              --notes-file /tmp/release-notes.md
+          else
+            gh release create "v$VERSION" \
+              --title "v$VERSION" \
+              --generate-notes
+          fi
