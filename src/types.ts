@@ -1,13 +1,25 @@
-/**
- * Shared types and interfaces for greenhouse.
- */
+// === GitHub Types ===
+
+export interface GhLabel {
+	name: string;
+}
+
+export interface GhIssue {
+	number: number;
+	title: string;
+	body: string;
+	labels: GhLabel[];
+	assignees: Array<{ login: string }>;
+}
+
+// === Run State ===
 
 export type RunStatus = "pending" | "ingested" | "running" | "shipping" | "shipped" | "failed";
 
 export interface RunState {
 	// GitHub source
 	ghIssueId: number;
-	ghRepo: string;
+	ghRepo: string; // "owner/repo"
 	ghTitle: string;
 	ghLabels: string[];
 
@@ -36,6 +48,8 @@ export interface RunState {
 	updatedAt: string;
 }
 
+// === Config Types ===
+
 export interface RepoConfig {
 	owner: string;
 	repo: string;
@@ -60,9 +74,72 @@ export interface DaemonConfig {
 	};
 }
 
+// === Budget ===
+
 export interface DailyBudget {
-	date: string;
+	date: string; // YYYY-MM-DD
 	dispatched: number;
 	cap: number;
 	remaining: number;
+}
+
+// === Subprocess Abstraction ===
+
+export interface ExecResult {
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+}
+
+export type ExecFn = (cmd: string[], opts?: { cwd?: string }) => Promise<ExecResult>;
+
+// === ov sling --json response ===
+
+export interface SlingResult {
+	success: boolean;
+	command: string;
+	agentName: string;
+	capability: string;
+	taskId: string;
+	branch: string;
+	worktree: string;
+	tmuxSession: string;
+	pid: number;
+}
+
+// === ov status --json response ===
+
+export interface AgentStatus {
+	agentName: string;
+	capability: string;
+	taskId: string;
+	branch: string;
+	state: "booting" | "working" | "completed" | "stalled" | "zombie";
+}
+
+export interface StatusResult {
+	success: boolean;
+	command: string;
+	currentRunId: string | null;
+	agents: AgentStatus[];
+	worktrees: Array<{ path: string; branch: string; head: string }>;
+	tmuxSessions: Array<{ name: string; pid: number }>;
+	unreadMailCount: number;
+	mergeQueueCount: number;
+	recentMetricsCount: number;
+}
+
+// === sd create --json response ===
+
+export interface SdCreateResult {
+	success: boolean;
+	command: string;
+	id: string;
+}
+
+// === Shipping ===
+
+export interface ShipResult {
+	prUrl: string;
+	prNumber: number;
 }

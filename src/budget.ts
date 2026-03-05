@@ -1,41 +1,49 @@
-import { readState } from "./state.ts";
-import type { DailyBudget, RunState } from "./types.ts";
+import type { DailyBudget } from "./types.ts";
 
-function todayDate(): string {
-	return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+function todayStr(): string {
+	return new Date().toISOString().slice(0, 10);
 }
 
-function countDispatchedToday(runs: RunState[], date: string): number {
-	return runs.filter((r) => {
-		if (!r.dispatchedAt) return false;
-		return r.dispatchedAt.slice(0, 10) === date;
-	}).length;
-}
+/** In-memory daily budget tracker. Resets at midnight (when date changes). */
+export class BudgetTracker {
+	private date: string;
+	private dispatched: number;
+	private cap: number;
 
-export async function getDailyBudget(cap: number, greeniouseDir?: string): Promise<DailyBudget> {
-	const runs = await readState(greeniouseDir);
-	const date = todayDate();
-	const dispatched = countDispatchedToday(runs, date);
-	return {
-		date,
-		dispatched,
-		cap,
-		remaining: Math.max(0, cap - dispatched),
-	};
-}
+	constructor(cap: number) {
+		this.cap = cap;
+		this.date = todayStr();
+		this.dispatched = 0;
+	}
 
-export function budgetExhausted(budget: DailyBudget): boolean {
-	return budget.remaining <= 0;
-}
+	/** Check if we have budget remaining for today. */
+	hasCapacity(): boolean {
+		this.maybeReset();
+		return this.dispatched < this.cap;
+	}
 
-/** Compute budget from an already-loaded run list (no I/O). */
-export function computeBudget(runs: RunState[], cap: number): DailyBudget {
-	const date = todayDate();
-	const dispatched = countDispatchedToday(runs, date);
-	return {
-		date,
-		dispatched,
-		cap,
-		remaining: Math.max(0, cap - dispatched),
-	};
+	/** Record a dispatched issue. */
+	consume(): void {
+		this.maybeReset();
+		this.dispatched++;
+	}
+
+	/** Get current budget status. */
+	status(): DailyBudget {
+		this.maybeReset();
+		return {
+			date: this.date,
+			dispatched: this.dispatched,
+			cap: this.cap,
+			remaining: Math.max(0, this.cap - this.dispatched),
+		};
+	}
+
+	private maybeReset(): void {
+		const today = todayStr();
+		if (today !== this.date) {
+			this.date = today;
+			this.dispatched = 0;
+		}
+	}
 }

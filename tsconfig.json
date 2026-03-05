@@ -1,17 +1,18 @@
 {
 	"compilerOptions": {
-		"target": "ESNext",
+		"target": "ES2022",
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"strict": true,
-		"esModuleInterop": true,
-		"skipLibCheck": true,
 		"noUncheckedIndexedAccess": true,
+		"noFallthroughCasesInSwitch": true,
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
 		"isolatedModules": true,
-		"types": ["bun-types"]
+		"skipLibCheck": true,
+		"paths": {
+			"@/*": ["./src/*"]
+		}
 	},
-	"include": ["src/**/*.ts"],
-	"exclude": ["node_modules", "dist", "**/*.test.ts"]
+	"include": ["src/**/*.ts"]
 }
