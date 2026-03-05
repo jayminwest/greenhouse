@@ -2,6 +2,7 @@ version: '1'
 domains:
   - greenhouse
   - architecture
+  - agents
 governance:
   max_entries: 100
   warn_entries: 150
