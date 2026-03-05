@@ -1,9 +1,13 @@
+/**
+ * Shared types and interfaces for greenhouse.
+ */
+
 export type RunStatus = "pending" | "ingested" | "running" | "shipping" | "shipped" | "failed";
 
 export interface RunState {
 	// GitHub source
 	ghIssueId: number;
-	ghRepo: string; // "owner/repo"
+	ghRepo: string;
 	ghTitle: string;
 	ghLabels: string[];
 
@@ -24,7 +28,7 @@ export interface RunState {
 	prNumber?: number;
 
 	// Timestamps
-	discoveredAt: string; // ISO 8601
+	discoveredAt: string;
 	ingestedAt?: string;
 	dispatchedAt?: string;
 	completedAt?: string;
@@ -57,31 +61,8 @@ export interface DaemonConfig {
 }
 
 export interface DailyBudget {
-	date: string; // YYYY-MM-DD
+	date: string;
 	dispatched: number;
 	cap: number;
 	remaining: number;
 }
-
-export const GREENHOUSE_DIR = ".greenhouse";
-export const STATE_FILE = "state.jsonl";
-export const CONFIG_FILE = "config.yaml";
-export const LOCK_STALE_MS = 30_000;
-export const LOCK_RETRY_MS = 100;
-export const LOCK_TIMEOUT_MS = 30_000;
-
-export const DEFAULT_PR_TEMPLATE = `## Greenhouse Auto-PR
-
-**GitHub Issue:** #{github_issue_number}
-**Seeds Task:** {seeds_task_id}
-
-### Summary
-{agent_summary}
-
-### Quality Gates
-- [ ] Tests pass
-- [ ] Lint clean
-- [ ] Typecheck clean
-
----
-Automated by [Greenhouse](https://github.com/jayminwest/greenhouse)`;

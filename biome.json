@@ -1,8 +1,5 @@
 {
 	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-	"files": {
-		"ignore": [".beads/**", ".claude/**", ".overstory/**", ".mulch/**", "node_modules/**"]
-	},
 	"organizeImports": {
 		"enabled": true
 	},
@@ -10,8 +7,16 @@
 		"enabled": true,
 		"rules": {
 			"recommended": true,
+			"correctness": {
+				"noUnusedVariables": "error",
+				"noUnusedImports": "error"
+			},
+			"suspicious": {
+				"noExplicitAny": "error"
+			},
 			"style": {
-				"noNonNullAssertion": "off"
+				"noNonNullAssertion": "warn",
+				"useConst": "error"
 			}
 		}
 	},

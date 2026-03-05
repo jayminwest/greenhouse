@@ -4,10 +4,14 @@
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"strict": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
 		"noUncheckedIndexedAccess": true,
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
+		"isolatedModules": true,
 		"types": ["bun-types"]
 	},
-	"include": ["src/**/*", "scripts/**/*"]
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules", "dist", "**/*.test.ts"]
 }
