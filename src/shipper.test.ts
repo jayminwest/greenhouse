@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { shipRun } from "./shipper.ts";
+import { cleanupAfterShip, shipRun } from "./shipper.ts";
 import type { DaemonConfig, ExecResult, RepoConfig, RunState } from "./types.ts";
 
 const testRepo: RepoConfig = {
@@ -223,5 +223,83 @@ describe("shipRun", () => {
 
 		const mergeCall = calls.find((c) => c.includes("merge") && c.includes("--auto"));
 		expect(mergeCall).toBeUndefined();
+	});
+});
+
+describe("cleanupAfterShip", () => {
+	test("runs all cleanup steps in order", async () => {
+		const calls: string[][] = [];
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		await cleanupAfterShip(makeRun(), testRepo, exec);
+
+		expect(calls[0]).toEqual(["git", "checkout", "main"]);
+		expect(calls[1]).toEqual(["git", "branch", "-D", "greenhouse/overstory-a1b2"]);
+		expect(calls[2]).toEqual(["git", "pull", "origin", "main"]);
+		expect(calls[3]).toEqual(["ov", "worktree", "clean", "--completed"]);
+		// spec file removal
+		expect(calls[4]?.[0]).toBe("rm");
+		expect(calls[4]?.join(" ")).toContain("overstory-a1b2-spec.md");
+	});
+
+	test("uses mergeBranch when set", async () => {
+		const calls: string[][] = [];
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		await cleanupAfterShip(makeRun({ mergeBranch: "greenhouse/overstory-a1b2" }), testRepo, exec);
+
+		const deleteBranch = calls.find((c) => c[1] === "branch" && c[2] === "-D");
+		expect(deleteBranch).toContain("greenhouse/overstory-a1b2");
+	});
+
+	test("falls back to greenhouse/<seedsId> when mergeBranch is not set", async () => {
+		const calls: string[][] = [];
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		await cleanupAfterShip(makeRun({ mergeBranch: undefined }), testRepo, exec);
+
+		const deleteBranch = calls.find((c) => c[1] === "branch" && c[2] === "-D");
+		expect(deleteBranch).toContain("greenhouse/overstory-a1b2");
+	});
+
+	test("continues if one step throws", async () => {
+		const calls: string[][] = [];
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
+			// Simulate git checkout failing
+			if (cmd[1] === "checkout") throw new Error("detached HEAD");
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		// Should not throw
+		await expect(cleanupAfterShip(makeRun(), testRepo, exec)).resolves.toBeUndefined();
+		// Remaining steps still ran
+		const cmds = calls.map((c) => c.slice(0, 3).join(" "));
+		expect(cmds).toContain("git branch -D");
+		expect(cmds).toContain("git pull origin");
+		expect(cmds).toContain("ov worktree clean");
+	});
+
+	test("continues if one step returns non-zero exit code", async () => {
+		const calls: string[][] = [];
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
+			// git branch -D fails (branch already deleted)
+			if (cmd[1] === "branch") return { exitCode: 1, stdout: "", stderr: "branch not found" };
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		await expect(cleanupAfterShip(makeRun(), testRepo, exec)).resolves.toBeUndefined();
+		// All 5 steps still ran
+		expect(calls).toHaveLength(5);
 	});
 });

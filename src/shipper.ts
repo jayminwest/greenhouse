@@ -133,3 +133,53 @@ export async function shipRun(
 
 	return { prUrl, prNumber };
 }
+
+/**
+ * Restore the repo to a clean state after a PR is shipped.
+ * All steps are best-effort — a failure in one step does not block subsequent steps.
+ */
+export async function cleanupAfterShip(
+	run: RunState,
+	repo: RepoConfig,
+	exec: ExecFn = defaultExec,
+): Promise<void> {
+	const { project_root } = repo;
+
+	// 1. git checkout main
+	try {
+		await exec(["git", "checkout", "main"], { cwd: project_root });
+	} catch (_) {
+		/* non-fatal */
+	}
+
+	// 2. Delete local merge branch
+	const branchToDelete = run.mergeBranch ?? `greenhouse/${run.seedsId}`;
+	try {
+		await exec(["git", "branch", "-D", branchToDelete], { cwd: project_root });
+	} catch (_) {
+		/* non-fatal */
+	}
+
+	// 3. git pull origin main
+	try {
+		await exec(["git", "pull", "origin", "main"], { cwd: project_root });
+	} catch (_) {
+		/* non-fatal */
+	}
+
+	// 4. Clean up overstory worktrees
+	try {
+		await exec(["ov", "worktree", "clean", "--completed"], { cwd: project_root });
+	} catch (_) {
+		/* non-fatal */
+	}
+
+	// 5. Remove spec file
+	try {
+		await exec(["rm", "-f", `${project_root}/.greenhouse/${run.seedsId}-spec.md`], {
+			cwd: project_root,
+		});
+	} catch (_) {
+		/* non-fatal */
+	}
+}

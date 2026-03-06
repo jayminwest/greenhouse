@@ -5,7 +5,7 @@ import { defaultExec } from "./exec.ts";
 import { ingestIssue } from "./ingester.ts";
 import { checkRunStatus } from "./monitor.ts";
 import { pollIssues } from "./poller.ts";
-import { shipRun } from "./shipper.ts";
+import { cleanupAfterShip, shipRun } from "./shipper.ts";
 import {
 	appendRun,
 	getActiveRuns,
@@ -177,6 +177,15 @@ async function advanceShipping(
 			duration_ms: shippingMs,
 			total_ms: totalMs,
 		});
+		// Post-ship cleanup: restore repo to clean state (best-effort, non-fatal)
+		try {
+			await cleanupAfterShip(run, repo, exec);
+		} catch (err) {
+			log("warn", "Post-ship cleanup failed (non-fatal)", {
+				seedsId: run.seedsId,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
 	} catch (err) {
 		log("error", "Shipping failed", {
 			event: "run.shipping_failed",
