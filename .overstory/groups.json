@@ -105,8 +105,28 @@
 		"memberIssueIds": [
 			"greenhouse-9136"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T18:34:37.718Z",
+		"completedAt": "2026-03-06T18:46:23.334Z"
+	},
+	{
+		"id": "group-9816ec83",
+		"name": "runs-clean",
+		"memberIssueIds": [
+			"greenhouse-bf03"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-06T18:51:25.467Z",
+		"completedAt": "2026-03-06T19:10:42.177Z"
+	},
+	{
+		"id": "group-26b7f34d",
+		"name": "post-ship-cleanup",
+		"memberIssueIds": [
+			"greenhouse-4040"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T19:14:27.180Z",
 		"completedAt": null
 	}
 ]
