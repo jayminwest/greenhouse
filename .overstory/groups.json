@@ -47,8 +47,23 @@
 		"memberIssueIds": [
 			"greenhouse-3d2b"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T01:16:48.292Z",
+		"completedAt": "2026-03-06T01:40:34.278Z"
+	},
+	{
+		"id": "group-fce5915d",
+		"name": "dogfood-fixes",
+		"memberIssueIds": [
+			"greenhouse-6b3b",
+			"greenhouse-8bef",
+			"greenhouse-f81f",
+			"greenhouse-f9ff",
+			"greenhouse-d8af",
+			"greenhouse-1e3e"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T01:43:24.817Z",
 		"completedAt": null
 	}
 ]
