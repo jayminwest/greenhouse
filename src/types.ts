@@ -34,6 +34,7 @@ export interface RunState {
 	// Overstory
 	agentName?: string;
 	branch?: string;
+	mergeBranch?: string;
 
 	// Shipping
 	prUrl?: string;

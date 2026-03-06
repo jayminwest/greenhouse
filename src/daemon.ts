@@ -15,6 +15,27 @@ function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: ob
 }
 
 /**
+ * Merge the agent's worktree branch into the greenhouse merge branch.
+ * Uses `ov merge --branch <agent> --into <mergeBranch>` so overstory's
+ * tiered conflict resolver handles the merge.
+ */
+async function mergeAgentBranch(
+	agentBranch: string,
+	mergeBranch: string,
+	repo: RepoConfig,
+	exec: ExecFn,
+): Promise<void> {
+	const { exitCode, stderr } = await exec(
+		["ov", "merge", "--branch", agentBranch, "--into", mergeBranch],
+		{ cwd: repo.project_root },
+	);
+
+	if (exitCode !== 0) {
+		throw new Error(`ov merge failed: ${stderr.trim()}`);
+	}
+}
+
+/**
  * Monitor all active runs and advance their state.
  * Returns updated runs.
  */
@@ -55,6 +76,30 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 					log("debug", "Run status", { seedsId: run.seedsId, state });
 
 					if (completed) {
+						// Merge agent branch into greenhouse merge branch
+						if (run.branch && run.mergeBranch) {
+							try {
+								await mergeAgentBranch(run.branch, run.mergeBranch, repo, exec);
+							} catch (err) {
+								log("error", "Merge into greenhouse branch failed", {
+									seedsId: run.seedsId,
+									agentBranch: run.branch,
+									mergeBranch: run.mergeBranch,
+									error: err instanceof Error ? err.message : String(err),
+								});
+								await updateRun(
+									run.ghIssueId,
+									run.ghRepo,
+									{
+										status: "failed",
+										error: `Merge failed: ${err instanceof Error ? err.message : String(err)}`,
+										retryable: true,
+									},
+									projectRoot,
+								);
+								continue;
+							}
+						}
 						const updated = await updateRun(
 							run.ghIssueId,
 							run.ghRepo,
@@ -197,18 +242,19 @@ export async function runPollCycle(
 				await appendRun(ingestedRun, projectRoot);
 				log("info", "Issue ingested", { ghIssueId: issue.number, seedsId });
 
-				// Dispatch: ov sling
-				const { agentName, branch, taskId } = await dispatchRun(seedsId, repo, exec);
+				// Dispatch: ov sling with greenhouse merge branch
+				const { agentName, branch, mergeBranch, taskId } = await dispatchRun(seedsId, repo, exec);
 				const runningRun: RunState = {
 					...ingestedRun,
 					status: "running",
 					agentName,
 					branch,
+					mergeBranch,
 					dispatchedAt: now,
 					updatedAt: now,
 				};
 				await appendRun(runningRun, projectRoot);
-				log("info", "Run dispatched", { seedsId: taskId, agentName, branch });
+				log("info", "Run dispatched", { seedsId: taskId, agentName, branch, mergeBranch });
 
 				budget.consume();
 				activeCount++;
