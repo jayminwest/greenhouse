@@ -95,8 +95,18 @@
 			"greenhouse-c5de",
 			"greenhouse-1b17"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T17:27:28.078Z",
+		"completedAt": "2026-03-06T18:32:52.326Z"
+	},
+	{
+		"id": "group-4e601c55",
+		"name": "poll-dryrun",
+		"memberIssueIds": [
+			"greenhouse-9136"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T18:34:37.718Z",
 		"completedAt": null
 	}
 ]
