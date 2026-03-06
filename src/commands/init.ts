@@ -19,7 +19,7 @@ poll_interval_minutes: 10
 daily_cap: 5
 
 dispatch:
-  capability: lead
+  capability: coordinator
   max_concurrent: 2
   monitor_interval_seconds: 30
   run_timeout_minutes: 60

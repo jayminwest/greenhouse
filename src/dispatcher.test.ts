@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { buildDispatchMessage, dispatchRun } from "./dispatcher.ts";
-import type { DispatchContext, ExecResult, RepoConfig, SlingResult } from "./types.ts";
+import type {
+	CoordinatorSendResult,
+	CoordinatorStatus,
+	DispatchContext,
+	ExecResult,
+	RepoConfig,
+} from "./types.ts";
 
 const testRepo: RepoConfig = {
 	owner: "jayminwest",
@@ -17,24 +23,28 @@ const testContext: DispatchContext = {
 	ghLabels: ["agent-ready", "type:bug", "priority:P1"],
 };
 
-function makeSlingResult(overrides?: Partial<SlingResult>): SlingResult {
+function makeCoordStatus(running: boolean): CoordinatorStatus {
 	return {
 		success: true,
-		command: "sling",
-		agentName: "coordinator-overstory-a1b2",
-		capability: "coordinator",
-		taskId: "overstory-a1b2",
-		branch: "overstory/coordinator-overstory-a1b2/overstory-a1b2",
-		worktree: "/tmp/worktrees/coordinator",
-		tmuxSession: "",
-		pid: 12345,
+		command: "coordinator status",
+		running,
+		watchdogRunning: false,
+		monitorRunning: false,
+	};
+}
+
+function makeCoordSendResult(overrides?: Partial<CoordinatorSendResult>): CoordinatorSendResult {
+	return {
+		success: true,
+		command: "coordinator send",
+		id: "mail-abc123",
+		nudged: true,
 		...overrides,
 	};
 }
 
 describe("dispatchRun", () => {
-	test("creates merge branch, dispatches with --base-branch, returns mergeBranch", async () => {
-		const slingResult = makeSlingResult();
+	test("creates merge branch, ensures coordinator, sends dispatch, returns result", async () => {
 		const calls: string[][] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			calls.push(cmd);
@@ -42,171 +52,205 @@ describe("dispatchRun", () => {
 			if (cmd[0] === "git" && cmd[1] === "branch") {
 				return { exitCode: 0, stdout: "", stderr: "" };
 			}
-			// ov sling
-			return {
-				exitCode: 0,
-				stdout: JSON.stringify(slingResult),
-				stderr: "",
-			};
+			// ov coordinator status
+			if (cmd[0] === "ov" && cmd[1] === "coordinator" && cmd[2] === "status") {
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify(makeCoordStatus(true)),
+					stderr: "",
+				};
+			}
+			// ov coordinator send
+			if (cmd[0] === "ov" && cmd[1] === "coordinator" && cmd[2] === "send") {
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify(makeCoordSendResult()),
+					stderr: "",
+				};
+			}
+			return { exitCode: 1, stdout: "", stderr: "unexpected command" };
 		};
 
 		const result = await dispatchRun("overstory-a1b2", testRepo, exec);
 
-		expect(result.agentName).toBe("coordinator-overstory-a1b2");
-		expect(result.branch).toBe("overstory/coordinator-overstory-a1b2/overstory-a1b2");
+		expect(result.agentName).toBe("coordinator");
 		expect(result.mergeBranch).toBe("greenhouse/overstory-a1b2");
-		expect(result.taskId).toBe("overstory-a1b2");
-		expect(result.pid).toBe(12345);
+		expect(result.mailId).toBe("mail-abc123");
 	});
 
-	test("creates greenhouse merge branch before calling ov sling", async () => {
+	test("creates greenhouse merge branch before dispatching", async () => {
 		const calls: string[][] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			calls.push(cmd);
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			return {
-				exitCode: 0,
-				stdout: JSON.stringify(makeSlingResult()),
-				stderr: "",
-			};
+			if (cmd[1] === "coordinator" && cmd[2] === "status") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" };
+			}
+			if (cmd[1] === "coordinator" && cmd[2] === "send") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordSendResult()), stderr: "" };
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
 		};
 
 		await dispatchRun("overstory-a1b2", testRepo, exec);
 
-		// First call should be git branch to create merge branch
 		expect(calls[0]).toEqual(["git", "branch", "greenhouse/overstory-a1b2", "HEAD"]);
 	});
 
-	test("passes --base-branch to ov sling", async () => {
-		let slingCmd: string[] = [];
+	test("starts coordinator if not running", async () => {
+		const calls: string[][] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			slingCmd = cmd;
-			return {
-				exitCode: 0,
-				stdout: JSON.stringify(makeSlingResult()),
-				stderr: "",
-			};
+			if (cmd[1] === "coordinator" && cmd[2] === "status") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordStatus(false)), stderr: "" };
+			}
+			if (cmd[1] === "coordinator" && cmd[2] === "start") {
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify({
+						success: true,
+						command: "coordinator start",
+						agentName: "coordinator",
+						capability: "coordinator",
+						tmuxSession: "ov-coord",
+						projectRoot: "/tmp/test-repo",
+						pid: 12345,
+						watchdog: true,
+						monitor: false,
+					}),
+					stderr: "",
+				};
+			}
+			if (cmd[1] === "coordinator" && cmd[2] === "send") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordSendResult()), stderr: "" };
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
 		};
 
 		await dispatchRun("overstory-a1b2", testRepo, exec);
 
-		expect(slingCmd).toContain("--base-branch");
-		const baseBranchIdx = slingCmd.indexOf("--base-branch");
-		expect(slingCmd[baseBranchIdx + 1]).toBe("greenhouse/overstory-a1b2");
+		const startCall = calls.find((c) => c[1] === "coordinator" && c[2] === "start");
+		expect(startCall).toBeDefined();
+		expect(startCall).toContain("--watchdog");
 	});
 
-	test("calls ov sling with correct args and cwd", async () => {
-		let capturedCmd: string[] = [];
-		let capturedCwd: string | undefined;
-		const exec = async (cmd: string[], opts?: { cwd?: string }): Promise<ExecResult> => {
+	test("skips coordinator start if already running", async () => {
+		const calls: string[][] = [];
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			capturedCmd = cmd;
-			capturedCwd = opts?.cwd;
-			return {
-				exitCode: 0,
-				stdout: JSON.stringify(makeSlingResult()),
-				stderr: "",
-			};
+			if (cmd[1] === "coordinator" && cmd[2] === "status") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" };
+			}
+			if (cmd[1] === "coordinator" && cmd[2] === "send") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordSendResult()), stderr: "" };
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
 		};
 
 		await dispatchRun("overstory-a1b2", testRepo, exec);
 
-		expect(capturedCmd).toContain("ov");
-		expect(capturedCmd).toContain("sling");
-		expect(capturedCmd).toContain("overstory-a1b2");
-		expect(capturedCmd).toContain("--json");
-		expect(capturedCwd).toBe(testRepo.project_root);
+		const startCall = calls.find((c) => c[1] === "coordinator" && c[2] === "start");
+		expect(startCall).toBeUndefined();
 	});
 
-	test("defaults to coordinator capability", async () => {
-		let capturedCmd: string[] = [];
+	test("sends dispatch with correct subject when context provided", async () => {
+		let sendCmd: string[] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			capturedCmd = cmd;
-			return {
-				exitCode: 0,
-				stdout: JSON.stringify(makeSlingResult()),
-				stderr: "",
-			};
-		};
-
-		await dispatchRun("overstory-a1b2", testRepo, exec);
-
-		expect(capturedCmd).toContain("--capability");
-		const capIdx = capturedCmd.indexOf("--capability");
-		expect(capturedCmd[capIdx + 1]).toBe("coordinator");
-	});
-
-	test("uses provided capability from options", async () => {
-		let capturedCmd: string[] = [];
-		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
-			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			capturedCmd = cmd;
-			return {
-				exitCode: 0,
-				stdout: JSON.stringify(makeSlingResult()),
-				stderr: "",
-			};
-		};
-
-		await dispatchRun("overstory-a1b2", testRepo, exec, { capability: "lead" });
-
-		const capIdx = capturedCmd.indexOf("--capability");
-		expect(capturedCmd[capIdx + 1]).toBe("lead");
-	});
-
-	test("passes --spec when context is provided", async () => {
-		let capturedCmd: string[] = [];
-		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
-			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			capturedCmd = cmd;
-			return {
-				exitCode: 0,
-				stdout: JSON.stringify(makeSlingResult()),
-				stderr: "",
-			};
+			if (cmd[1] === "coordinator" && cmd[2] === "status") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" };
+			}
+			if (cmd[1] === "coordinator" && cmd[2] === "send") {
+				sendCmd = cmd;
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordSendResult()), stderr: "" };
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
 		};
 
 		await dispatchRun("overstory-a1b2", testRepo, exec, { context: testContext });
 
-		expect(capturedCmd).toContain("--spec");
-		const specIdx = capturedCmd.indexOf("--spec");
-		expect(capturedCmd[specIdx + 1]).toContain("overstory-a1b2-spec.md");
+		const subjectIdx = sendCmd.indexOf("--subject");
+		expect(subjectIdx).toBeGreaterThan(-1);
+		expect(sendCmd[subjectIdx + 1]).toBe("Objective: fix: retry logic in mail client");
 	});
 
-	test("does not pass --spec when no context provided", async () => {
-		let capturedCmd: string[] = [];
+	test("sends generic subject when no context provided", async () => {
+		let sendCmd: string[] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			capturedCmd = cmd;
-			return {
-				exitCode: 0,
-				stdout: JSON.stringify(makeSlingResult()),
-				stderr: "",
-			};
+			if (cmd[1] === "coordinator" && cmd[2] === "status") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" };
+			}
+			if (cmd[1] === "coordinator" && cmd[2] === "send") {
+				sendCmd = cmd;
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordSendResult()), stderr: "" };
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
 		};
 
 		await dispatchRun("overstory-a1b2", testRepo, exec);
 
-		expect(capturedCmd).not.toContain("--spec");
+		const subjectIdx = sendCmd.indexOf("--subject");
+		expect(sendCmd[subjectIdx + 1]).toBe("Objective: implement overstory-a1b2");
 	});
 
-	test("throws on non-zero exit from ov sling", async () => {
+	test("passes --json to coordinator send", async () => {
+		let sendCmd: string[] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			return { exitCode: 1, stdout: "", stderr: "ov: no tmux session" };
+			if (cmd[1] === "coordinator" && cmd[2] === "status") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" };
+			}
+			if (cmd[1] === "coordinator" && cmd[2] === "send") {
+				sendCmd = cmd;
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordSendResult()), stderr: "" };
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
 		};
-		await expect(dispatchRun("overstory-a1b2", testRepo, exec)).rejects.toThrow("ov sling failed");
+
+		await dispatchRun("overstory-a1b2", testRepo, exec);
+
+		expect(sendCmd).toContain("--json");
+	});
+
+	test("throws on non-zero exit from coordinator send", async () => {
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
+			if (cmd[1] === "coordinator" && cmd[2] === "status") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" };
+			}
+			return { exitCode: 1, stdout: "", stderr: "coordinator: not alive" };
+		};
+		await expect(dispatchRun("overstory-a1b2", testRepo, exec)).rejects.toThrow(
+			"ov coordinator send failed",
+		);
 	});
 
 	test("throws when merge branch creation fails", async () => {
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			if (cmd[0] === "git") return { exitCode: 1, stdout: "", stderr: "branch already exists" };
-			return { exitCode: 0, stdout: JSON.stringify(makeSlingResult()), stderr: "" };
+			return { exitCode: 0, stdout: JSON.stringify(makeCoordSendResult()), stderr: "" };
 		};
 		await expect(dispatchRun("overstory-a1b2", testRepo, exec)).rejects.toThrow(
 			"Failed to create merge branch",
+		);
+	});
+
+	test("throws when coordinator start fails", async () => {
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
+			if (cmd[1] === "coordinator" && cmd[2] === "status") {
+				return { exitCode: 0, stdout: JSON.stringify(makeCoordStatus(false)), stderr: "" };
+			}
+			if (cmd[1] === "coordinator" && cmd[2] === "start") {
+				return { exitCode: 1, stdout: "", stderr: "failed to start" };
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+		await expect(dispatchRun("overstory-a1b2", testRepo, exec)).rejects.toThrow(
+			"ov coordinator start failed",
 		);
 	});
 });

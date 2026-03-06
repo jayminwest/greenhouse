@@ -169,14 +169,13 @@ export async function runPollCycle(
 			if (activeCount >= config.dispatch.max_concurrent) break;
 
 			try {
-				const { agentName, branch, mergeBranch } = await dispatchRun(run.seedsId, repo, exec);
+				const { agentName, mergeBranch, mailId } = await dispatchRun(run.seedsId, repo, exec);
 				await updateRun(
 					run.ghIssueId,
 					run.ghRepo,
 					{
 						status: "running",
 						agentName,
-						branch,
 						mergeBranch,
 						dispatchedAt: new Date().toISOString(),
 						error: undefined,
@@ -188,8 +187,8 @@ export async function runPollCycle(
 					seedsId: run.seedsId,
 					ghIssueId: run.ghIssueId,
 					agentName,
-					branch,
 					mergeBranch,
+					mailId,
 				});
 				activeCount++;
 			} catch (err) {
@@ -263,19 +262,26 @@ export async function runPollCycle(
 				await appendRun(ingestedRun, projectRoot);
 				log("info", "Issue ingested", { ghIssueId: issue.number, seedsId });
 
-				// Dispatch: ov sling with greenhouse merge branch
-				const { agentName, branch, mergeBranch, taskId } = await dispatchRun(seedsId, repo, exec);
+				// Dispatch: send to coordinator with greenhouse merge branch
+				const { agentName, mergeBranch, mailId } = await dispatchRun(seedsId, repo, exec, {
+					context: {
+						seedsTitle: issue.title,
+						ghIssueNumber: issue.number,
+						ghRepo: repoStr,
+						ghIssueBody: issue.body,
+						ghLabels: issue.labels.map((l) => l.name),
+					},
+				});
 				const runningRun: RunState = {
 					...ingestedRun,
 					status: "running",
 					agentName,
-					branch,
 					mergeBranch,
 					dispatchedAt: now,
 					updatedAt: now,
 				};
 				await appendRun(runningRun, projectRoot);
-				log("info", "Run dispatched", { seedsId: taskId, agentName, branch, mergeBranch });
+				log("info", "Run dispatched", { seedsId, agentName, mergeBranch, mailId });
 
 				budget.consume();
 				activeCount++;

@@ -114,7 +114,7 @@ export async function retryRun(
 		...reset,
 		status: "running",
 		agentName: dispatched.agentName,
-		branch: dispatched.branch,
+		mergeBranch: dispatched.mergeBranch,
 		dispatchedAt: new Date().toISOString(),
 		updatedAt: new Date().toISOString(),
 	};

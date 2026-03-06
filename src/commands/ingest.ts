@@ -113,14 +113,14 @@ export function registerIngestCommand(program: Command): void {
 					status: "running",
 					seedsId,
 					agentName: dispatchResult.agentName,
-					branch: dispatchResult.branch,
+					mergeBranch: dispatchResult.mergeBranch,
 					dispatchedAt: new Date().toISOString(),
 				},
 				repoConfig.project_root,
 			);
 
 			process.stdout.write(
-				`Dispatched: agent=${dispatchResult.agentName} branch=${dispatchResult.branch} seeds=${seedsId}\n`,
+				`Dispatched: agent=${dispatchResult.agentName} mergeBranch=${dispatchResult.mergeBranch} seeds=${seedsId}\n`,
 			);
 		});
 }

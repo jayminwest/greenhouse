@@ -30,8 +30,14 @@ function makeSdIssue(status: string): SdIssue {
 	};
 }
 
-function makeCoordStatus(alive: boolean): CoordinatorStatus {
-	return { alive };
+function makeCoordStatus(running: boolean): CoordinatorStatus {
+	return {
+		success: true,
+		command: "coordinator status",
+		running,
+		watchdogRunning: false,
+		monitorRunning: false,
+	};
 }
 
 describe("checkRunStatus", () => {
@@ -48,7 +54,7 @@ describe("checkRunStatus", () => {
 		expect(result.failed).toBeUndefined();
 	});
 
-	test("returns completed=false when issue is in_progress and coordinator alive", async () => {
+	test("returns completed=false when issue is in_progress and coordinator running", async () => {
 		const exec = makeExec(
 			{ exitCode: 0, stdout: JSON.stringify(makeSdIssue("in_progress")), stderr: "" },
 			{ exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" },
@@ -72,7 +78,7 @@ describe("checkRunStatus", () => {
 		expect(result.retryable).toBe(true);
 	});
 
-	test("returns failed+retryable when coordinator reports alive=false", async () => {
+	test("returns failed+retryable when coordinator reports running=false", async () => {
 		const exec = makeExec(
 			{ exitCode: 0, stdout: JSON.stringify(makeSdIssue("in_progress")), stderr: "" },
 			{ exitCode: 0, stdout: JSON.stringify(makeCoordStatus(false)), stderr: "" },

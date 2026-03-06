@@ -21,16 +21,41 @@ Greenhouse runs a continuous poll-dispatch-monitor-ship loop:
 ```
 GitHub Issues → Poller → Ingester → Dispatcher → Monitor → Shipper → GitHub PR
        ↓            ↓          ↓           ↓          ↓          ↓
-   gh issue     filter by   sd create   ov sling   ov status   git push
-     list       labels                              check     gh pr create
+   gh issue     filter by   sd create   ov coord   ov coord    git push
+     list       labels                   send      status     gh pr create
 ```
 
 1. **Poller** (`src/poller.ts`) — fetches open GitHub issues filtered by configured labels via `gh issue list`
 2. **Ingester** (`src/ingester.ts`) — maps GitHub issue metadata (labels, priority, type) to a seeds task via `sd create`
-3. **Dispatcher** (`src/dispatcher.ts`) — creates a greenhouse merge branch, then spawns an overstory lead agent via `ov sling`
-4. **Monitor** (`src/monitor.ts`) — polls `ov status --json` to detect agent completion or zombie state
+3. **Dispatcher** (`src/dispatcher.ts`) — creates a greenhouse merge branch, ensures the coordinator is running, then sends a dispatch message via `ov coordinator send`
+4. **Monitor** (`src/monitor.ts`) — polls `sd show --json` for seeds issue closure and `ov coordinator status --json` for coordinator health
 5. **Shipper** (`src/shipper.ts`) — pushes the merge branch, creates a GitHub PR via `gh pr create`, and comments on the original issue
 6. **Daemon** (`src/daemon.ts`) — orchestrates the full cycle: monitor active runs → poll new issues → ingest → dispatch → ship. Handles SIGINT/SIGTERM for graceful shutdown and SIGHUP for config reload.
+
+### Greenhouse–Overstory Contract
+
+Greenhouse communicates with overstory exclusively through the coordinator agent:
+
+**Dispatch (greenhouse → coordinator):**
+- `ov coordinator start --watchdog --json` — ensure coordinator is running (idempotent)
+- `ov coordinator send --body <spec> --subject "Objective: <title>" --json` — send dispatch mail
+- Mail type is `dispatch` (set internally by overstory), from `operator` to `coordinator`
+- The `--body` contains a structured spec with seeds ID, GitHub issue context, labels, merge branch, and coordinator instructions
+- Returns `{ id, nudged }` — the mail ID and whether the coordinator was nudged via tmux
+
+**Monitoring (greenhouse polls coordinator):**
+- `ov coordinator status --json` — returns `{ running, state?, sessionId?, pid?, watchdogRunning, monitorRunning }`
+- `sd show <seedsId> --json` — returns seeds issue status (primary completion signal)
+- Completion detected when: seeds issue `status === "closed"` (coordinator closes it when done)
+- Failure detected when: coordinator `running === false` but seeds issue still open → retryable
+
+**Expected lifecycle:**
+1. Greenhouse creates merge branch `greenhouse/<seedsId>`
+2. Greenhouse ensures coordinator is running, sends dispatch mail
+3. Coordinator decomposes task, spawns lead agents, coordinates work
+4. Coordinator merges agent work into `greenhouse/<seedsId>`
+5. Coordinator closes the seeds issue: `sd close <seedsId>`
+6. Greenhouse detects closed issue, ships merge branch as PR
 
 ### State Management
 
@@ -59,8 +84,8 @@ greenhouse/
     daemon.ts                 # Main daemon loop (poll → dispatch → monitor → ship)
     poller.ts                 # GitHub issue polling via gh CLI
     ingester.ts               # GitHub → seeds issue mapping
-    dispatcher.ts             # Overstory agent dispatch via ov sling
-    monitor.ts                # Agent completion detection via ov status
+    dispatcher.ts             # Overstory coordinator dispatch via ov coordinator send
+    monitor.ts                # Coordinator completion detection via ov coordinator status
     shipper.ts                # Branch push + PR creation via gh/git
     state.ts                  # JSONL run state (append-only, dedup-on-read)
     budget.ts                 # Daily dispatch budget tracker

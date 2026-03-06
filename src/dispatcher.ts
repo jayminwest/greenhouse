@@ -1,18 +1,22 @@
 import { join } from "node:path";
 import { defaultExec } from "./exec.ts";
-import type { DispatchContext, ExecFn, RepoConfig, SlingResult } from "./types.ts";
+import type {
+	CoordinatorSendResult,
+	CoordinatorStartResult,
+	CoordinatorStatus,
+	DispatchContext,
+	ExecFn,
+	RepoConfig,
+} from "./types.ts";
 import { GREENHOUSE_DIR } from "./types.ts";
 
 export interface DispatchResult {
 	agentName: string;
-	branch: string;
 	mergeBranch: string;
-	taskId: string;
-	pid: number;
+	mailId: string;
 }
 
 export interface DispatchOptions {
-	capability?: string;
 	context?: DispatchContext;
 }
 
@@ -86,6 +90,36 @@ async function createMergeBranch(seedsId: string, repo: RepoConfig, exec: ExecFn
 }
 
 /**
+ * Ensure the coordinator is running. Checks status first; starts if not running.
+ * Returns the coordinator's agent name.
+ */
+async function ensureCoordinator(repo: RepoConfig, exec: ExecFn): Promise<string> {
+	// Check if coordinator is already running
+	const statusResult = await exec(["ov", "coordinator", "status", "--json"], {
+		cwd: repo.project_root,
+	});
+
+	if (statusResult.exitCode === 0) {
+		const status = JSON.parse(statusResult.stdout) as CoordinatorStatus;
+		if (status.running) {
+			return "coordinator";
+		}
+	}
+
+	// Start the coordinator
+	const startResult = await exec(["ov", "coordinator", "start", "--watchdog", "--json"], {
+		cwd: repo.project_root,
+	});
+
+	if (startResult.exitCode !== 0) {
+		throw new Error(`ov coordinator start failed: ${startResult.stderr.trim()}`);
+	}
+
+	const result = JSON.parse(startResult.stdout) as CoordinatorStartResult;
+	return result.agentName;
+}
+
+/**
  * Write dispatch message spec to .greenhouse/<seedsId>-spec.md and return path.
  */
 async function writeSpecFile(
@@ -99,12 +133,11 @@ async function writeSpecFile(
 }
 
 /**
- * Dispatch an overstory coordinator agent for a seeds task.
- * Creates a greenhouse merge branch first, then dispatches via `ov sling`.
- * Returns agent metadata including the merge branch for shipping.
+ * Dispatch work to the coordinator via `ov coordinator send`.
+ * Creates a greenhouse merge branch first, then sends a dispatch message
+ * to the persistent coordinator agent.
  *
- * @param options.capability - Agent capability to dispatch (default: "coordinator")
- * @param options.context    - Issue context for structured dispatch message
+ * @param options.context - Issue context for structured dispatch message
  */
 export async function dispatchRun(
 	seedsId: string,
@@ -112,42 +145,40 @@ export async function dispatchRun(
 	exec: ExecFn = defaultExec,
 	options: DispatchOptions = {},
 ): Promise<DispatchResult> {
-	const capability = options.capability ?? "coordinator";
-
 	// Create greenhouse-controlled merge branch before dispatching
 	const mergeBranch = await createMergeBranch(seedsId, repo, exec);
 
-	const slingArgs = [
-		"ov",
-		"sling",
-		seedsId,
-		"--capability",
-		capability,
-		"--base-branch",
-		mergeBranch,
-		"--json",
-	];
+	// Ensure coordinator is running
+	const agentName = await ensureCoordinator(repo, exec);
 
-	// If issue context is provided, write a structured spec file for the coordinator
-	if (options.context) {
-		const message = buildDispatchMessage(seedsId, mergeBranch, options.context);
-		const specPath = await writeSpecFile(seedsId, message, repo.project_root);
-		slingArgs.push("--spec", specPath);
+	// Build the dispatch message
+	const context = options.context;
+	const subject = context ? `Objective: ${context.seedsTitle}` : `Objective: implement ${seedsId}`;
+
+	let body: string;
+	if (context) {
+		body = buildDispatchMessage(seedsId, mergeBranch, context);
+		// Also write spec file for reference
+		await writeSpecFile(seedsId, body, repo.project_root);
+	} else {
+		body = `Implement seeds task ${seedsId}. Merge all work into branch \`${mergeBranch}\`. Close the seeds issue when done: \`sd close ${seedsId}\`.`;
 	}
 
-	const { exitCode, stdout, stderr } = await exec(slingArgs, { cwd: repo.project_root });
+	// Send dispatch to coordinator
+	const { exitCode, stdout, stderr } = await exec(
+		["ov", "coordinator", "send", "--body", body, "--subject", subject, "--json"],
+		{ cwd: repo.project_root },
+	);
 
 	if (exitCode !== 0) {
-		throw new Error(`ov sling failed: ${stderr.trim()}`);
+		throw new Error(`ov coordinator send failed: ${stderr.trim()}`);
 	}
 
-	const result = JSON.parse(stdout) as SlingResult;
+	const result = JSON.parse(stdout) as CoordinatorSendResult;
 
 	return {
-		agentName: result.agentName,
-		branch: result.branch,
+		agentName,
 		mergeBranch,
-		taskId: result.taskId,
-		pid: result.pid,
+		mailId: result.id,
 	};
 }

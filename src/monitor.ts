@@ -11,9 +11,10 @@ export interface MonitorResult {
 /**
  * Check the status of a run by polling `sd show <seedsId> --json`.
  * A run is complete when the seeds issue status is "closed".
- * Also checks coordinator health: if the coordinator died with the issue still
- * open, returns completed=true with failed=true and retryable=true so the
- * daemon can reschedule.
+ * Also checks coordinator health via `ov coordinator status --json`:
+ * if the coordinator is not running (state=completed, zombie, or tmux dead)
+ * with the issue still open, returns completed=true with failed=true and
+ * retryable=true so the daemon can reschedule.
  */
 export async function checkRunStatus(
 	taskId: string,
@@ -41,12 +42,13 @@ export async function checkRunStatus(
 	});
 
 	if (coordResult.exitCode !== 0) {
-		// Coordinator is gone but issue still open — failed and retryable
+		// Coordinator command failed — coordinator is gone
 		return { completed: true, state: "failed", failed: true, retryable: true };
 	}
 
 	const coordStatus = JSON.parse(coordResult.stdout) as CoordinatorStatus;
-	if (!coordStatus.alive) {
+	if (!coordStatus.running) {
+		// Coordinator is not running but issue still open — failed and retryable
 		return { completed: true, state: "failed", failed: true, retryable: true };
 	}
 

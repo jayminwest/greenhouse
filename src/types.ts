@@ -94,40 +94,27 @@ export interface ExecResult {
 
 export type ExecFn = (cmd: string[], opts?: { cwd?: string }) => Promise<ExecResult>;
 
-// === ov sling --json response ===
+// === ov coordinator start --json response ===
 
-export interface SlingResult {
+export interface CoordinatorStartResult {
 	success: boolean;
 	command: string;
 	agentName: string;
 	capability: string;
-	taskId: string;
-	branch: string;
-	worktree: string;
 	tmuxSession: string;
+	projectRoot: string;
 	pid: number;
+	watchdog: boolean;
+	monitor: boolean;
 }
 
-// === ov status --json response ===
+// === ov coordinator send --json response ===
 
-export interface AgentStatus {
-	agentName: string;
-	capability: string;
-	taskId: string;
-	branch: string;
-	state: "booting" | "working" | "completed" | "stalled" | "zombie";
-}
-
-export interface StatusResult {
+export interface CoordinatorSendResult {
 	success: boolean;
 	command: string;
-	currentRunId: string | null;
-	agents: AgentStatus[];
-	worktrees: Array<{ path: string; branch: string; head: string }>;
-	tmuxSessions: Array<{ name: string; pid: number }>;
-	unreadMailCount: number;
-	mergeQueueCount: number;
-	recentMetricsCount: number;
+	id: string;
+	nudged: boolean;
 }
 
 // === sd create --json response ===
@@ -154,9 +141,36 @@ export interface SdIssue {
 // === ov coordinator status --json response ===
 
 export interface CoordinatorStatus {
-	alive: boolean;
+	success: boolean;
+	command: string;
+	running: boolean;
+	sessionId?: string;
+	state?: string;
+	tmuxSession?: string;
 	pid?: number;
 	startedAt?: string;
+	lastActivity?: string;
+	watchdogRunning: boolean;
+	monitorRunning: boolean;
+}
+
+// === ov coordinator check-complete --json response ===
+
+export interface TriggerResult {
+	enabled: boolean;
+	met: boolean;
+	detail: string;
+}
+
+export interface CheckCompleteResult {
+	success: boolean;
+	command: string;
+	complete: boolean;
+	triggers: {
+		allAgentsDone: TriggerResult;
+		taskTrackerEmpty: TriggerResult;
+		onShutdownSignal: TriggerResult;
+	};
 }
 
 // === Constants ===
