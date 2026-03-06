@@ -1,4 +1,5 @@
 import { BudgetTracker } from "./budget.ts";
+import { cleanupAfterFailure } from "./cleanup.ts";
 import { loadConfig } from "./config.ts";
 import { dispatchRun } from "./dispatcher.ts";
 import { defaultExec } from "./exec.ts";
@@ -58,6 +59,14 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 							},
 							projectRoot,
 						);
+						try {
+							await cleanupAfterFailure(run, repo, "run timeout exceeded", true, exec);
+						} catch (cleanupErr) {
+							log("warn", "Post-failure cleanup failed (non-fatal)", {
+								seedsId: run.seedsId,
+								error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+							});
+						}
 						continue;
 					}
 
@@ -98,6 +107,20 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 									error: err instanceof Error ? err.message : String(err),
 								});
 							}
+						}
+						try {
+							await cleanupAfterFailure(
+								run,
+								repo,
+								"Agents exited without closing the seeds issue",
+								result.retryable ?? true,
+								exec,
+							);
+						} catch (cleanupErr) {
+							log("warn", "Post-failure cleanup failed (non-fatal)", {
+								seedsId: run.seedsId,
+								error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+							});
 						}
 					} else if (result.completed) {
 						// Seeds issue closed — success, proceed to shipping
