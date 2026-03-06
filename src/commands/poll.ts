@@ -9,9 +9,51 @@ import { loadConfig } from "../config.ts";
 import { runPollCycle } from "../daemon.ts";
 import { defaultExec } from "../exec.ts";
 import { ingestIssue } from "../ingester.ts";
+import { isJsonMode, outputJson } from "../output.ts";
 import { pollIssues } from "../poller.ts";
 import { appendRun, isIngested } from "../state.ts";
-import type { RunState } from "../types.ts";
+import type { DaemonConfig, ExecFn, RunState } from "../types.ts";
+
+export interface DryRunIssueResult {
+	number: number;
+	title: string;
+	labels: string[];
+	alreadyIngested: boolean;
+}
+
+export interface DryRunRepoResult {
+	repo: string;
+	issues: DryRunIssueResult[];
+	error?: string;
+}
+
+export async function runDryPoll(config: DaemonConfig, exec: ExecFn): Promise<DryRunRepoResult[]> {
+	const results: DryRunRepoResult[] = [];
+	for (const repo of config.repos) {
+		const repoStr = `${repo.owner}/${repo.repo}`;
+		try {
+			const issues = await pollIssues(repo, exec);
+			const issueResults: DryRunIssueResult[] = [];
+			for (const issue of issues) {
+				const alreadyIngested = await isIngested(repo.project_root, repoStr, issue.number);
+				issueResults.push({
+					number: issue.number,
+					title: issue.title,
+					labels: issue.labels.map((l) => l.name),
+					alreadyIngested,
+				});
+			}
+			results.push({ repo: repoStr, issues: issueResults });
+		} catch (err) {
+			results.push({
+				repo: repoStr,
+				issues: [],
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+	return results;
+}
 
 export function registerPollCommand(program: Command): void {
 	program
@@ -34,22 +76,22 @@ export function registerPollCommand(program: Command): void {
 			const exec = defaultExec;
 
 			if (opts.dryRun) {
-				// Dry run: poll only, report findings — no state changes
+				const results = await runDryPoll(config, exec);
+				if (isJsonMode()) {
+					outputJson({ success: true, repos: results });
+					return;
+				}
 				process.stdout.write("Dry run: polling issues (no ingest or dispatch)\n");
-				for (const repo of config.repos) {
-					const repoStr = `${repo.owner}/${repo.repo}`;
-					try {
-						const issues = await pollIssues(repo, exec);
-						process.stdout.write(`${repoStr}: ${issues.length} issue(s) found\n`);
-						for (const issue of issues) {
-							const alreadyIngested = await isIngested(repo.project_root, repoStr, issue.number);
-							const marker = alreadyIngested ? "[already ingested]" : "[new]";
-							process.stdout.write(`  #${issue.number} ${marker} ${issue.title}\n`);
-						}
-					} catch (err) {
-						process.stderr.write(
-							`Poll failed for ${repoStr}: ${err instanceof Error ? err.message : String(err)}\n`,
-						);
+				for (const result of results) {
+					if (result.error) {
+						process.stderr.write(`Poll failed for ${result.repo}: ${result.error}\n`);
+						continue;
+					}
+					process.stdout.write(`${result.repo}: ${result.issues.length} issue(s) found\n`);
+					for (const issue of result.issues) {
+						const marker = issue.alreadyIngested ? "[already ingested]" : "[new]";
+						const labelStr = issue.labels.length > 0 ? ` (${issue.labels.join(", ")})` : "";
+						process.stdout.write(`  #${issue.number} ${marker} ${issue.title}${labelStr}\n`);
 					}
 				}
 				return;

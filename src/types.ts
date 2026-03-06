@@ -72,6 +72,7 @@ export interface DaemonConfig {
 	shipping: {
 		auto_push: boolean;
 		pr_template: string;
+		auto_merge?: boolean;
 	};
 }
 

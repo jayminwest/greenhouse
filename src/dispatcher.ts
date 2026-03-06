@@ -62,10 +62,17 @@ You are a coordinator agent dispatched by Greenhouse to implement a GitHub issue
 
 1. **Decompose** the task into work streams and spawn lead agents.
 2. **Coordinate** lead agents to implement the changes.
-3. **Merge** all agent branches into the base branch (\`${mergeBranch}\`) when complete.
-4. **Close** the seeds issue when done: \`sd close ${seedsId} --reason "..."\`
-5. **Clean up** all worktrees used by agents when finished.
-6. **Stop** after completing this task and closing the seeds issue. Do NOT pick up additional work. Your session is scoped to this single task.
+3. **Wait for ALL agents to complete.** Do NOT proceed until every lead and builder agent you spawned has finished and their work is merged.
+4. **Merge** all agent branches into the base branch (\`${mergeBranch}\`). Verify the merge branch contains the feature commits — not just metadata.
+5. **Clean up** all worktrees and sessions used by agents.
+6. **Close** the seeds issue LAST: \`sd close ${seedsId} --reason "..."\`
+
+**CRITICAL: The seeds issue closure is greenhouse's signal to ship a PR. Do NOT close it until:**
+- All spawned agents (leads AND builders) have completed
+- All agent work has been merged into \`${mergeBranch}\`
+- All worktrees and sessions are cleaned up
+
+Closing the seeds issue prematurely will cause greenhouse to ship an empty PR.
 
 The base branch \`${mergeBranch}\` is greenhouse's merge target. All work must land here before greenhouse can ship the PR.
 `;

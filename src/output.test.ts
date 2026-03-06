@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
+	compactDuration,
+	computeStageDurations,
+	formatDuration,
 	isJsonMode,
 	isQuietMode,
 	isTimingMode,
@@ -52,6 +55,91 @@ afterEach(() => {
 	setQuietMode(false);
 	setVerboseMode(false);
 	setTimingMode(false);
+});
+
+describe("formatDuration", () => {
+	test("formats seconds", () => {
+		expect(formatDuration(5000)).toBe("5s");
+	});
+
+	test("formats minutes and seconds", () => {
+		expect(formatDuration(8 * 60 * 1000 + 23 * 1000)).toBe("8m 23s");
+	});
+
+	test("formats hours and minutes", () => {
+		expect(formatDuration(1 * 3600 * 1000 + 2 * 60 * 1000)).toBe("1h 2m");
+	});
+
+	test("formats 0ms as 0s", () => {
+		expect(formatDuration(0)).toBe("0s");
+	});
+});
+
+describe("computeStageDurations", () => {
+	test("returns isRunning true when status is running", () => {
+		const run = makeRun({
+			status: "running",
+			dispatchedAt: new Date(Date.now() - 5000).toISOString(),
+		});
+		const d = computeStageDurations(run);
+		expect(d.isRunning).toBe(true);
+		expect(d.agentMs).toBeGreaterThan(0);
+	});
+
+	test("returns isRunning false for non-running status", () => {
+		const run = makeRun({ status: "shipped" });
+		const d = computeStageDurations(run);
+		expect(d.isRunning).toBe(false);
+	});
+
+	test("computes ingestMs from discoveredAt to ingestedAt", () => {
+		const discovered = new Date(Date.now() - 10000).toISOString();
+		const ingested = new Date(Date.now() - 8000).toISOString();
+		const run = makeRun({ discoveredAt: discovered, ingestedAt: ingested });
+		const d = computeStageDurations(run);
+		expect(d.ingestMs).toBeCloseTo(2000, -2);
+	});
+
+	test("computes shippingMs from completedAt to shippedAt", () => {
+		const completed = new Date(Date.now() - 4000).toISOString();
+		const shipped = new Date(Date.now() - 1000).toISOString();
+		const run = makeRun({ status: "shipped", completedAt: completed, shippedAt: shipped });
+		const d = computeStageDurations(run);
+		expect(d.shippingMs).toBeCloseTo(3000, -2);
+	});
+
+	test("computes totalMs from discoveredAt to shippedAt for shipped run", () => {
+		const discovered = new Date(Date.now() - 20000).toISOString();
+		const shipped = new Date(Date.now() - 1000).toISOString();
+		const run = makeRun({ status: "shipped", discoveredAt: discovered, shippedAt: shipped });
+		const d = computeStageDurations(run);
+		expect(d.totalMs).toBeCloseTo(19000, -2);
+	});
+});
+
+describe("compactDuration", () => {
+	test("returns 'running Xs' for active runs", () => {
+		const run = makeRun({
+			status: "running",
+			dispatchedAt: new Date(Date.now() - 5000).toISOString(),
+		});
+		const result = compactDuration(run);
+		expect(result).toMatch(/^running \d+s$/);
+	});
+
+	test("returns total duration for shipped runs", () => {
+		const discovered = new Date(Date.now() - 10000).toISOString();
+		const shipped = new Date(Date.now() - 1000).toISOString();
+		const run = makeRun({ status: "shipped", discoveredAt: discovered, shippedAt: shipped });
+		const result = compactDuration(run);
+		expect(result).toMatch(/^\d+s$|^\d+m \d+s$|^\d+h \d+m$/);
+	});
+
+	test("returns empty string when no durations available", () => {
+		const run = makeRun({ status: "pending" });
+		const result = compactDuration(run);
+		expect(result).toBe("");
+	});
 });
 
 describe("mode getters/setters", () => {

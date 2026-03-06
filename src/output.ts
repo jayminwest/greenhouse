@@ -1,6 +1,63 @@
 import chalk from "chalk";
 import type { DailyBudget, RunState } from "./types.ts";
 
+// === Duration utilities ===
+
+export interface StageDurations {
+	ingestMs?: number; // discoveredAt → ingestedAt
+	agentMs?: number; // dispatchedAt → completedAt (or now if still running)
+	shippingMs?: number; // completedAt → shippedAt
+	totalMs?: number; // discoveredAt → shippedAt (or now if active)
+	isRunning: boolean;
+}
+
+/** Format milliseconds into a human-readable string like "8m 23s" or "1h 2m". */
+export function formatDuration(ms: number): string {
+	const totalSeconds = Math.floor(ms / 1000);
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	if (hours > 0) return `${hours}h ${minutes}m`;
+	if (minutes > 0) return `${minutes}m ${seconds}s`;
+	return `${seconds}s`;
+}
+
+/** Compute per-stage durations from a RunState's timestamps. */
+export function computeStageDurations(run: RunState): StageDurations {
+	const now = Date.now();
+	const discovered = new Date(run.discoveredAt).getTime();
+	const ingested = run.ingestedAt ? new Date(run.ingestedAt).getTime() : undefined;
+	const dispatched = run.dispatchedAt ? new Date(run.dispatchedAt).getTime() : undefined;
+	const completed = run.completedAt ? new Date(run.completedAt).getTime() : undefined;
+	const shipped = run.shippedAt ? new Date(run.shippedAt).getTime() : undefined;
+
+	const isRunning = run.status === "running";
+
+	const ingestMs = ingested !== undefined ? ingested - discovered : undefined;
+	const agentMs =
+		dispatched !== undefined
+			? completed !== undefined
+				? completed - dispatched
+				: isRunning
+					? now - dispatched
+					: undefined
+			: undefined;
+	const shippingMs =
+		completed !== undefined && shipped !== undefined ? shipped - completed : undefined;
+	const totalMs =
+		shipped !== undefined ? shipped - discovered : isRunning ? now - discovered : undefined;
+
+	return { ingestMs, agentMs, shippingMs, totalMs, isRunning };
+}
+
+/** Returns a compact duration string for one-line run output. */
+export function compactDuration(run: RunState): string {
+	const { agentMs, totalMs, isRunning } = computeStageDurations(run);
+	if (isRunning && agentMs !== undefined) return `running ${formatDuration(agentMs)}`;
+	if (totalMs !== undefined) return formatDuration(totalMs);
+	return "";
+}
+
 // Greenhouse color palette — earthy/forest tones
 export const brand = chalk.rgb(124, 179, 66); // green
 export const accent = chalk.rgb(255, 183, 77); // amber
@@ -103,7 +160,9 @@ export function printRunOneLine(run: RunState): void {
 	const id = accent.bold(`#${run.ghIssueId}`);
 	const title = run.ghTitle.length > 60 ? `${run.ghTitle.slice(0, 57)}...` : run.ghTitle;
 	const seedsId = run.seedsId ? muted(` [${run.seedsId}]`) : "";
-	console.log(`${icon} ${repo} ${id} ${title}${seedsId}`);
+	const dur = compactDuration(run);
+	const durStr = dur ? muted(` ${dur}`) : "";
+	console.log(`${icon} ${repo} ${id} ${title}${seedsId}${durStr}`);
 }
 
 export function printRunFull(run: RunState): void {
@@ -130,6 +189,19 @@ export function printRunFull(run: RunState): void {
 	if (run.completedAt) console.log(`Completed:   ${muted(run.completedAt)}`);
 	if (run.shippedAt) console.log(`Shipped:     ${muted(run.shippedAt)}`);
 	console.log(`Updated:     ${muted(run.updatedAt)}`);
+
+	const { ingestMs, agentMs, shippingMs, totalMs, isRunning } = computeStageDurations(run);
+	const hasDurations = ingestMs !== undefined || agentMs !== undefined || totalMs !== undefined;
+	if (hasDurations) {
+		console.log("");
+		if (ingestMs !== undefined) console.log(`Ingest time: ${muted(formatDuration(ingestMs))}`);
+		if (agentMs !== undefined)
+			console.log(
+				`Agent work:  ${muted(formatDuration(agentMs))}${isRunning ? muted(" (running)") : ""}`,
+			);
+		if (shippingMs !== undefined) console.log(`Shipping:    ${muted(formatDuration(shippingMs))}`);
+		if (totalMs !== undefined) console.log(`Total:       ${accent(formatDuration(totalMs))}`);
+	}
 }
 
 export function printBudget(budget: DailyBudget): void {

@@ -40,10 +40,13 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 					// Check for timeout
 					const dispatchedAt = run.dispatchedAt ? new Date(run.dispatchedAt).getTime() : 0;
 					const timeoutMs = config.dispatch.run_timeout_minutes * 60 * 1000;
-					if (Date.now() - dispatchedAt > timeoutMs) {
+					const runningMs = Date.now() - dispatchedAt;
+					if (runningMs > timeoutMs) {
 						log("warn", "Run timeout exceeded", {
+							event: "run.timeout",
 							seedsId: run.seedsId,
 							ghIssueId: run.ghIssueId,
+							duration_ms: runningMs,
 						});
 						await updateRun(
 							run.ghIssueId,
@@ -59,11 +62,33 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 					}
 
 					// Check completion
-					const { completed, state } = await checkRunStatus(run.seedsId, repo, exec);
-					log("debug", "Run status", { seedsId: run.seedsId, state });
+					const result = await checkRunStatus(run.seedsId, repo, exec);
+					log("debug", "Run status", {
+						seedsId: run.seedsId,
+						state: result.state,
+						failed: result.failed,
+					});
 
-					if (completed) {
-						// Teardown coordinator (clean up worktrees, sessions)
+					if (result.completed && result.failed) {
+						// Agent(s) exited without closing the seeds issue — mark as failed
+						const failedNow = Date.now();
+						log("warn", "Run failed — agents exited without completing", {
+							event: "run.failed",
+							seedsId: run.seedsId,
+							ghIssueId: run.ghIssueId,
+							duration_ms: dispatchedAt ? failedNow - dispatchedAt : undefined,
+							retryable: result.retryable,
+						});
+						await updateRun(
+							run.ghIssueId,
+							run.ghRepo,
+							{
+								status: "failed",
+								error: "Agents exited without closing the seeds issue",
+								retryable: result.retryable ?? true,
+							},
+							projectRoot,
+						);
 						if (run.agentName) {
 							try {
 								await teardownCoordinator(run.agentName, repo, exec);
@@ -74,12 +99,31 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 								});
 							}
 						}
+					} else if (result.completed) {
+						// Seeds issue closed — success, proceed to shipping
+						if (run.agentName) {
+							try {
+								await teardownCoordinator(run.agentName, repo, exec);
+							} catch (err) {
+								log("warn", "Coordinator teardown failed (non-fatal)", {
+									seedsId: run.seedsId,
+									error: err instanceof Error ? err.message : String(err),
+								});
+							}
+						}
+						const completedNow = Date.now();
+						log("info", "Run completed", {
+							event: "run.completed",
+							seedsId: run.seedsId,
+							ghIssueId: run.ghIssueId,
+							duration_ms: dispatchedAt ? completedNow - dispatchedAt : undefined,
+						});
 						const updated = await updateRun(
 							run.ghIssueId,
 							run.ghRepo,
 							{
 								status: "shipping",
-								completedAt: new Date().toISOString(),
+								completedAt: new Date(completedNow).toISOString(),
 							},
 							projectRoot,
 						);
@@ -108,6 +152,13 @@ async function advanceShipping(
 ): Promise<void> {
 	try {
 		const { prUrl, prNumber } = await shipRun(run, repo, config, exec);
+		const shippedNow = Date.now();
+		const shippingMs = run.completedAt
+			? shippedNow - new Date(run.completedAt).getTime()
+			: undefined;
+		const totalMs = run.discoveredAt
+			? shippedNow - new Date(run.discoveredAt).getTime()
+			: undefined;
 		await updateRun(
 			run.ghIssueId,
 			run.ghRepo,
@@ -115,13 +166,20 @@ async function advanceShipping(
 				status: "shipped",
 				prUrl,
 				prNumber,
-				shippedAt: new Date().toISOString(),
+				shippedAt: new Date(shippedNow).toISOString(),
 			},
 			projectRoot,
 		);
-		log("info", "Run shipped", { seedsId: run.seedsId, prUrl });
+		log("info", "Run shipped", {
+			event: "run.shipped",
+			seedsId: run.seedsId,
+			prUrl,
+			duration_ms: shippingMs,
+			total_ms: totalMs,
+		});
 	} catch (err) {
 		log("error", "Shipping failed", {
+			event: "run.shipping_failed",
 			seedsId: run.seedsId,
 			error: err instanceof Error ? err.message : String(err),
 		});
@@ -184,6 +242,7 @@ export async function runPollCycle(
 					projectRoot,
 				);
 				log("info", "Retrying failed run", {
+					event: "run.retry_dispatched",
 					seedsId: run.seedsId,
 					ghIssueId: run.ghIssueId,
 					agentName,
@@ -193,6 +252,7 @@ export async function runPollCycle(
 				activeCount++;
 			} catch (err) {
 				log("error", "Retry dispatch failed", {
+					event: "run.retry_failed",
 					seedsId: run.seedsId,
 					ghIssueId: run.ghIssueId,
 					error: err instanceof Error ? err.message : String(err),
@@ -236,7 +296,8 @@ export async function runPollCycle(
 			if (alreadyIngested) continue;
 
 			// Record as discovered
-			const now = new Date().toISOString();
+			const nowMs = Date.now();
+			const now = new Date(nowMs).toISOString();
 			const discoveredRun: RunState = {
 				ghIssueId: issue.number,
 				ghRepo: repoStr,
@@ -260,7 +321,12 @@ export async function runPollCycle(
 					updatedAt: now,
 				};
 				await appendRun(ingestedRun, projectRoot);
-				log("info", "Issue ingested", { ghIssueId: issue.number, seedsId });
+				log("info", "Issue ingested", {
+					event: "run.ingested",
+					ghIssueId: issue.number,
+					seedsId,
+					duration_ms: nowMs - new Date(discoveredRun.discoveredAt).getTime(),
+				});
 
 				// Dispatch: send to coordinator with greenhouse merge branch
 				const { agentName, mergeBranch, mailId } = await dispatchRun(seedsId, repo, exec, {
@@ -281,12 +347,21 @@ export async function runPollCycle(
 					updatedAt: now,
 				};
 				await appendRun(runningRun, projectRoot);
-				log("info", "Run dispatched", { seedsId, agentName, mergeBranch, mailId });
+				log("info", "Run dispatched", {
+					event: "run.dispatched",
+					seedsId,
+					agentName,
+					mergeBranch,
+					mailId,
+					duration_ms:
+						nowMs - new Date(ingestedRun.ingestedAt ?? ingestedRun.discoveredAt).getTime(),
+				});
 
 				budget.consume();
 				activeCount++;
 			} catch (err) {
 				log("error", "Dispatch failed", {
+					event: "run.failed",
 					ghIssueId: issue.number,
 					error: err instanceof Error ? err.message : String(err),
 				});

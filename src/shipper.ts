@@ -45,6 +45,14 @@ export async function shipRun(
 		throw new Error(`Run ${run.seedsId} has no branch to push`);
 	}
 
+	// Pre-ship validation: ensure branch has commits ahead of main
+	const { exitCode: diffCode } = await exec(["git", "diff", "--quiet", `main...${branch}`], {
+		cwd: repo.project_root,
+	});
+	if (diffCode === 0) {
+		throw new Error(`Merge branch has no commits ahead of main — agent work was not merged`);
+	}
+
 	// Push the branch
 	const { exitCode: pushCode, stderr: pushErr } = await exec(["git", "push", "origin", branch], {
 		cwd: repo.project_root,
@@ -90,6 +98,23 @@ export async function shipRun(
 	const prUrl = prOut.trim();
 	const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
 	const prNumber = prNumberMatch?.[1] ? Number.parseInt(prNumberMatch[1], 10) : 0;
+
+	// Auto-merge if configured
+	if (config.shipping.auto_merge) {
+		await exec(
+			[
+				"gh",
+				"pr",
+				"merge",
+				String(prNumber),
+				"--repo",
+				`${repo.owner}/${repo.repo}`,
+				"--auto",
+				"--squash",
+			],
+			{ cwd: repo.project_root },
+		);
+	}
 
 	// Comment on the GitHub issue with the PR link
 	await exec(
