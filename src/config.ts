@@ -308,6 +308,7 @@ function validateConfig(raw: Record<string, unknown>): DaemonConfig {
 				typeof shipping.pr_template === "string"
 					? shipping.pr_template
 					: DEFAULT_CONFIG.shipping.pr_template,
+			auto_merge: typeof shipping.auto_merge === "boolean" ? shipping.auto_merge : undefined,
 		},
 	};
 }
