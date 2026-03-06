@@ -398,6 +398,12 @@ describe("buildDispatchMessage", () => {
 		expect(msg).toContain("priority:P1");
 	});
 
+	test("includes stop instruction after task completion", () => {
+		const msg = buildDispatchMessage("overstory-a1b2", "greenhouse/overstory-a1b2", testContext);
+		expect(msg).toContain("Stop");
+		expect(msg).toContain("Do NOT pick up additional work");
+	});
+
 	test("handles missing optional fields gracefully", () => {
 		const minimalContext: DispatchContext = {
 			seedsTitle: "simple task",
