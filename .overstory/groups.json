@@ -125,8 +125,22 @@
 		"memberIssueIds": [
 			"greenhouse-4040"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T19:14:27.180Z",
+		"completedAt": "2026-03-06T19:25:37.347Z"
+	},
+	{
+		"id": "group-91b436f7",
+		"name": "ready-issues-batch",
+		"memberIssueIds": [
+			"greenhouse-39c0",
+			"greenhouse-dbe9",
+			"greenhouse-47d3",
+			"greenhouse-1ac6",
+			"greenhouse-6bcf"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T19:41:49.613Z",
 		"completedAt": null
 	}
 ]
