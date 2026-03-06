@@ -63,8 +63,28 @@
 			"greenhouse-1e3e",
 			"greenhouse-0fb0"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T01:43:24.817Z",
+		"completedAt": "2026-03-06T01:56:10.279Z"
+	},
+	{
+		"id": "group-61368971",
+		"name": "timing-observability",
+		"memberIssueIds": [
+			"greenhouse-f615"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T02:07:01.024Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-42c7824b",
+		"name": "timing-observability",
+		"memberIssueIds": [
+			"greenhouse-b0d0"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-06T15:48:36.310Z",
+		"completedAt": "2026-03-06T17:25:19.802Z"
 	}
 ]
