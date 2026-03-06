@@ -28,6 +28,48 @@ function renderPrBody(run: RunState, config: DaemonConfig): string {
 }
 
 /**
+ * If the greenhouse merge branch is empty (no commits ahead of main), attempt to
+ * recover by merging any local overstory agent branches that match the seeds ID.
+ * Returns the number of branches successfully merged.
+ */
+export async function recoverAgentBranches(
+	seedsId: string,
+	branch: string,
+	projectRoot: string,
+	exec: ExecFn,
+): Promise<number> {
+	const { stdout: branchListOut } = await exec(
+		["git", "branch", "--list", `overstory/*/greenhouse-${seedsId}`],
+		{ cwd: projectRoot },
+	);
+
+	const agentBranches = branchListOut
+		.split("\n")
+		.map((b) => b.trim().replace(/^\*\s*/, ""))
+		.filter(Boolean);
+
+	if (agentBranches.length === 0) return 0;
+
+	// Ensure we're on the greenhouse merge branch before merging
+	await exec(["git", "checkout", branch], { cwd: projectRoot });
+
+	let merged = 0;
+	for (const agentBranch of agentBranches) {
+		const { exitCode: mergeCode } = await exec(
+			["git", "merge", "--no-ff", agentBranch, "-m", `chore: recover agent branch ${agentBranch}`],
+			{ cwd: projectRoot },
+		);
+		if (mergeCode !== 0) {
+			// Abort failed merge and continue with remaining branches
+			await exec(["git", "merge", "--abort"], { cwd: projectRoot });
+		} else {
+			merged++;
+		}
+	}
+	return merged;
+}
+
+/**
  * Push the greenhouse merge branch and create a GitHub PR.
  * Uses mergeBranch (greenhouse-controlled) instead of the agent's worktree branch,
  * since overstory may have already cleaned up the worktree branch.
@@ -45,10 +87,25 @@ export async function shipRun(
 		throw new Error(`Run ${run.seedsId} has no branch to push`);
 	}
 
-	// Pre-ship validation: ensure branch has commits ahead of main
-	const { exitCode: diffCode } = await exec(["git", "diff", "--quiet", `main...${branch}`], {
+	// Pre-ship validation (phase 1): check if merge branch already has commits ahead of main
+	const { exitCode: initialDiffCode } = await exec(["git", "diff", "--quiet", `main...${branch}`], {
 		cwd: repo.project_root,
 	});
+	let diffCode = initialDiffCode;
+
+	// Recovery: if merge branch is empty, attempt to merge matching agent branches
+	if (diffCode === 0) {
+		const recovered = await recoverAgentBranches(run.seedsId, branch, repo.project_root, exec);
+		if (recovered > 0) {
+			// Re-check diff after recovery
+			const { exitCode: recheckCode } = await exec(["git", "diff", "--quiet", `main...${branch}`], {
+				cwd: repo.project_root,
+			});
+			diffCode = recheckCode;
+		}
+	}
+
+	// Pre-ship validation (phase 2): fail if still empty after recovery
 	if (diffCode === 0) {
 		throw new Error(`Merge branch has no commits ahead of main — agent work was not merged`);
 	}
@@ -111,6 +168,7 @@ export async function shipRun(
 				`${repo.owner}/${repo.repo}`,
 				"--auto",
 				"--squash",
+				"--delete-branch",
 			],
 			{ cwd: repo.project_root },
 		);
@@ -156,6 +214,13 @@ export async function cleanupAfterShip(
 	const branchToDelete = run.mergeBranch ?? `greenhouse/${run.seedsId}`;
 	try {
 		await exec(["git", "branch", "-D", branchToDelete], { cwd: project_root });
+	} catch (_) {
+		/* non-fatal */
+	}
+
+	// 2b. Delete remote merge branch (best-effort)
+	try {
+		await exec(["git", "push", "origin", "--delete", branchToDelete], { cwd: project_root });
 	} catch (_) {
 		/* non-fatal */
 	}
