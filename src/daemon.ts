@@ -62,11 +62,45 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 					}
 
 					// Check completion
-					const { completed, state } = await checkRunStatus(run.seedsId, repo, exec);
-					log("debug", "Run status", { seedsId: run.seedsId, state });
+					const result = await checkRunStatus(run.seedsId, repo, exec);
+					log("debug", "Run status", {
+						seedsId: run.seedsId,
+						state: result.state,
+						failed: result.failed,
+					});
 
-					if (completed) {
-						// Teardown coordinator (clean up worktrees, sessions)
+					if (result.completed && result.failed) {
+						// Agent(s) exited without closing the seeds issue — mark as failed
+						const failedNow = Date.now();
+						log("warn", "Run failed — agents exited without completing", {
+							event: "run.failed",
+							seedsId: run.seedsId,
+							ghIssueId: run.ghIssueId,
+							duration_ms: dispatchedAt ? failedNow - dispatchedAt : undefined,
+							retryable: result.retryable,
+						});
+						await updateRun(
+							run.ghIssueId,
+							run.ghRepo,
+							{
+								status: "failed",
+								error: "Agents exited without closing the seeds issue",
+								retryable: result.retryable ?? true,
+							},
+							projectRoot,
+						);
+						if (run.agentName) {
+							try {
+								await teardownCoordinator(run.agentName, repo, exec);
+							} catch (err) {
+								log("warn", "Coordinator teardown failed (non-fatal)", {
+									seedsId: run.seedsId,
+									error: err instanceof Error ? err.message : String(err),
+								});
+							}
+						}
+					} else if (result.completed) {
+						// Seeds issue closed — success, proceed to shipping
 						if (run.agentName) {
 							try {
 								await teardownCoordinator(run.agentName, repo, exec);
