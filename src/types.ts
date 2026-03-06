@@ -138,6 +138,27 @@ export interface SdCreateResult {
 	id: string;
 }
 
+// === sd show --json response ===
+
+export interface SdIssue {
+	id: string;
+	title: string;
+	status: string;
+	type?: string;
+	priority?: number;
+	createdAt: string;
+	updatedAt: string;
+	reason?: string;
+}
+
+// === ov coordinator status --json response ===
+
+export interface CoordinatorStatus {
+	alive: boolean;
+	pid?: number;
+	startedAt?: string;
+}
+
 // === Constants ===
 
 export const GREENHOUSE_DIR = ".greenhouse";
