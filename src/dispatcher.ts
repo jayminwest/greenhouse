@@ -90,6 +90,27 @@ async function createMergeBranch(seedsId: string, repo: RepoConfig, exec: ExecFn
 }
 
 /**
+ * Checkout the merge branch and write .overstory/session-branch.txt so
+ * `ov merge` resolves to the correct target without needing an --into flag.
+ */
+async function setupSessionBranch(
+	mergeBranch: string,
+	repo: RepoConfig,
+	exec: ExecFn,
+): Promise<void> {
+	const { exitCode, stderr } = await exec(["git", "checkout", mergeBranch], {
+		cwd: repo.project_root,
+	});
+
+	if (exitCode !== 0) {
+		throw new Error(`Failed to checkout merge branch ${mergeBranch}: ${stderr.trim()}`);
+	}
+
+	const sessionBranchPath = join(repo.project_root, ".overstory", "session-branch.txt");
+	await Bun.write(sessionBranchPath, mergeBranch);
+}
+
+/**
  * Ensure the coordinator is running. Checks status first; starts if not running.
  * Returns the coordinator's agent name.
  */
@@ -147,6 +168,9 @@ export async function dispatchRun(
 ): Promise<DispatchResult> {
 	// Create greenhouse-controlled merge branch before dispatching
 	const mergeBranch = await createMergeBranch(seedsId, repo, exec);
+
+	// Checkout merge branch and write session-branch.txt for ov merge resolution
+	await setupSessionBranch(mergeBranch, repo, exec);
 
 	// Ensure coordinator is running
 	const agentName = await ensureCoordinator(repo, exec);
