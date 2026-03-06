@@ -7,6 +7,10 @@ export const accent = chalk.rgb(255, 183, 77); // amber
 export const muted = chalk.rgb(120, 120, 110); // gray
 
 let _json = false;
+let _quiet = false;
+let _verbose = false;
+let _timing = false;
+let _timingStart = 0;
 
 export function setJsonMode(v: boolean): void {
 	_json = v;
@@ -14,6 +18,50 @@ export function setJsonMode(v: boolean): void {
 
 export function isJsonMode(): boolean {
 	return _json;
+}
+
+export function setQuietMode(v: boolean): void {
+	_quiet = v;
+}
+
+export function isQuietMode(): boolean {
+	return _quiet;
+}
+
+export function setVerboseMode(v: boolean): void {
+	_verbose = v;
+}
+
+export function isVerboseMode(): boolean {
+	return _verbose;
+}
+
+export function setTimingMode(v: boolean): void {
+	_timing = v;
+}
+
+export function isTimingMode(): boolean {
+	return _timing;
+}
+
+export function startTiming(): void {
+	_timingStart = Date.now();
+}
+
+export function printElapsed(label = "Elapsed"): void {
+	if (!_timing) return;
+	const ms = Date.now() - _timingStart;
+	const s = (ms / 1000).toFixed(3);
+	if (_json) {
+		process.stderr.write(`${label}: ${s}s\n`);
+	} else {
+		console.log(`${muted(`${label}:`)} ${s}s`);
+	}
+}
+
+export function printDebug(msg: string): void {
+	if (!_verbose) return;
+	console.log(`${chalk.gray("·")} ${chalk.gray(msg)}`);
 }
 
 export function outputJson(data: unknown): void {
@@ -30,12 +78,12 @@ export function printError(msg: string): void {
 }
 
 export function printWarning(msg: string): void {
-	if (_json) return;
+	if (_json || _quiet) return;
 	console.log(`${chalk.yellow("!")} ${msg}`);
 }
 
 export function printInfo(msg: string): void {
-	if (_json) return;
+	if (_json || _quiet) return;
 	console.log(`${muted("·")} ${msg}`);
 }
 

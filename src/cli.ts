@@ -19,6 +19,14 @@ import { registerShipCommand } from "./commands/ship.ts";
 import { registerStartCommand } from "./commands/start.ts";
 import { registerStatusCommand } from "./commands/status.ts";
 import { registerStopCommand } from "./commands/stop.ts";
+import {
+	printElapsed,
+	setJsonMode,
+	setQuietMode,
+	setTimingMode,
+	setVerboseMode,
+	startTiming,
+} from "./output.ts";
 
 export const VERSION = "0.1.0";
 
@@ -32,7 +40,10 @@ program
 	)
 	.version(VERSION, "-v, --version", "Print version")
 	.option("--json", "JSON output")
-	.option("--config <path>", "Config file path (default: .greenhouse/config.yaml)");
+	.option("--config <path>", "Config file path (default: .greenhouse/config.yaml)")
+	.option("--quiet", "Suppress non-essential output (only errors and JSON)")
+	.option("--verbose", "Enable debug-level output for troubleshooting")
+	.option("--timing", "Print elapsed time after command completes");
 
 // --version --json
 const rawArgs = process.argv.slice(2);
@@ -47,6 +58,26 @@ if ((rawArgs.includes("-v") || rawArgs.includes("--version")) && rawArgs.include
 	);
 	process.exit(0);
 }
+
+// Wire up global option state before any command action runs
+program.hook("preAction", () => {
+	const opts = program.opts<{
+		json?: boolean;
+		quiet?: boolean;
+		verbose?: boolean;
+		timing?: boolean;
+	}>();
+	setJsonMode(opts.json ?? false);
+	setQuietMode(opts.quiet ?? false);
+	setVerboseMode(opts.verbose ?? false);
+	setTimingMode(opts.timing ?? false);
+	if (opts.timing) startTiming();
+});
+
+// Print elapsed time after command completes when --timing is set
+program.hook("postAction", () => {
+	printElapsed();
+});
 
 // Register commands in scope
 registerStartCommand(program);
