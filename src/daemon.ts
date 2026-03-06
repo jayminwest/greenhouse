@@ -7,7 +7,7 @@ import { ingestIssue } from "./ingester.ts";
 import { pidFilePath, removePid, writePid } from "./pid.ts";
 import { pollIssues } from "./poller.ts";
 import { appendRun, getActiveRuns, isIngested, readAllRuns, updateRun } from "./state.ts";
-import { isSupervisorAlive, spawnSupervisor } from "./supervisor.ts";
+import { isSupervisorAlive, killSupervisor, spawnSupervisor } from "./supervisor.ts";
 import type { DaemonConfig, ExecFn, GhIssue, RunState } from "./types.ts";
 
 function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: object): void {
@@ -31,7 +31,36 @@ async function monitorSupervisors(config: DaemonConfig, exec: ExecFn): Promise<v
 
 			try {
 				const alive = await isSupervisorAlive(run.supervisorSessionName, exec);
-				if (alive) continue;
+
+				if (alive) {
+					// Check for daemon-level timeout — hard limit, outer safety net
+					const timeoutMs = config.dispatch.run_timeout_minutes * 60 * 1000;
+					const spawnedAt = run.supervisorSpawnedAt ?? run.dispatchedAt;
+					if (spawnedAt) {
+						const elapsedMs = Date.now() - new Date(spawnedAt).getTime();
+						if (elapsedMs >= timeoutMs) {
+							log("warn", "Supervisor timed out, killing session", {
+								event: "supervisor.timeout",
+								seedsId: run.seedsId,
+								sessionName: run.supervisorSessionName,
+								elapsed_minutes: Math.floor(elapsedMs / 60_000),
+								timeout_minutes: config.dispatch.run_timeout_minutes,
+							});
+							await killSupervisor(run.supervisorSessionName, exec);
+							await updateRun(
+								run.ghIssueId,
+								run.ghRepo,
+								{
+									status: "failed",
+									error: `Supervisor timed out after ${config.dispatch.run_timeout_minutes} minutes`,
+									retryable: true,
+								},
+								projectRoot,
+							);
+						}
+					}
+					continue;
+				}
 
 				// Supervisor exited — read the final state it wrote to state.jsonl
 				const allRuns = await readAllRuns(projectRoot);
@@ -174,6 +203,7 @@ export async function runPollCycle(
 					agentName,
 					mergeBranch,
 					supervisorSessionName: sessionName,
+					supervisorSpawnedAt: now,
 					dispatchedAt: now,
 					updatedAt: now,
 				};

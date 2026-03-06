@@ -179,6 +179,110 @@ describe("monitorSupervisors via runPollCycle", () => {
 	});
 });
 
+describe("supervisor timeout", () => {
+	test("alive supervisor within timeout: no kill", async () => {
+		const run = makeRun({
+			status: "running",
+			supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
+			supervisorSpawnedAt: new Date(Date.now() - 30 * 60_000).toISOString(), // 30 min ago
+		});
+		await appendRun(run, TMP);
+
+		const config = makeConfig(); // run_timeout_minutes: 60
+		let killSessionCalled = false;
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "tmux" && cmd[1] === "has-session") {
+				return { exitCode: 0, stdout: "", stderr: "" }; // alive
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "kill-session") {
+				killSessionCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		expect(killSessionCalled).toBe(false);
+		const runs = await readAllRuns(TMP);
+		const result = runs.find((r) => r.seedsId === "testrepo-a1b2");
+		expect(result?.status).toBe("running");
+	});
+
+	test("alive supervisor past timeout: kills session and marks run failed with retryable:true", async () => {
+		const run = makeRun({
+			status: "running",
+			supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
+			supervisorSpawnedAt: new Date(Date.now() - 61 * 60_000).toISOString(), // 61 min ago
+		});
+		await appendRun(run, TMP);
+
+		const config = makeConfig(); // run_timeout_minutes: 60
+		let killSessionCalled = false;
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "tmux" && cmd[1] === "has-session") {
+				return { exitCode: 0, stdout: "", stderr: "" }; // alive
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "display-message") {
+				return { exitCode: 0, stdout: "9999\n", stderr: "" };
+			}
+			if (cmd[0] === "pgrep") {
+				return { exitCode: 1, stdout: "", stderr: "" }; // no children
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "kill-session") {
+				killSessionCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		expect(killSessionCalled).toBe(true);
+		const runs = await readAllRuns(TMP);
+		const latest = runs.filter((r) => r.seedsId === "testrepo-a1b2").at(-1);
+		expect(latest?.status).toBe("failed");
+		expect(latest?.retryable).toBe(true);
+		expect(latest?.error).toMatch(/timed out/i);
+	});
+
+	test("alive supervisor past timeout falls back to dispatchedAt when no supervisorSpawnedAt", async () => {
+		const run = makeRun({
+			status: "running",
+			supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
+			dispatchedAt: new Date(Date.now() - 61 * 60_000).toISOString(), // 61 min ago, no supervisorSpawnedAt
+		});
+		await appendRun(run, TMP);
+
+		const config = makeConfig();
+		let killSessionCalled = false;
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "tmux" && cmd[1] === "has-session") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "display-message") {
+				return { exitCode: 0, stdout: "9999\n", stderr: "" };
+			}
+			if (cmd[0] === "pgrep") {
+				return { exitCode: 1, stdout: "", stderr: "" };
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "kill-session") {
+				killSessionCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		expect(killSessionCalled).toBe(true);
+		const runs = await readAllRuns(TMP);
+		const latest = runs.filter((r) => r.seedsId === "testrepo-a1b2").at(-1);
+		expect(latest?.status).toBe("failed");
+		expect(latest?.error).toMatch(/timed out/i);
+	});
+});
+
 describe("runPollCycle dispatch + supervisor spawn", () => {
 	test("dispatches new issue and spawns supervisor, stores supervisorSessionName", async () => {
 		const config = makeConfig();

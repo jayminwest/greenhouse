@@ -96,7 +96,7 @@ describe("loadConfig", () => {
 		expect(config.dispatch.capability).toBe("coordinator");
 		expect(config.dispatch.max_concurrent).toBe(2);
 		expect(config.dispatch.monitor_interval_seconds).toBe(30);
-		expect(config.dispatch.run_timeout_minutes).toBe(60);
+		expect(config.dispatch.run_timeout_minutes).toBe(90);
 		expect(config.shipping.auto_push).toBe(true);
 		expect(typeof config.shipping.pr_template).toBe("string");
 		expect(config.shipping.pr_template.length).toBeGreaterThan(0);

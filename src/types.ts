@@ -45,6 +45,7 @@ export interface RunState {
 	discoveredAt: string;
 	ingestedAt?: string;
 	dispatchedAt?: string;
+	supervisorSpawnedAt?: string;
 	completedAt?: string;
 	shippedAt?: string;
 	updatedAt: string;
