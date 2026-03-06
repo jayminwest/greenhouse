@@ -160,8 +160,19 @@
 		"memberIssueIds": [
 			"greenhouse-7cb5"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T20:36:30.958Z",
+		"completedAt": "2026-03-06T20:46:25.038Z"
+	},
+	{
+		"id": "group-5b422b61",
+		"name": "supervisor-phase3",
+		"memberIssueIds": [
+			"greenhouse-4f82",
+			"greenhouse-5b04"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T20:48:10.979Z",
 		"completedAt": null
 	}
 ]
