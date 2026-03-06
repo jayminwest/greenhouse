@@ -318,7 +318,7 @@ describe("dispatchRun session-branch setup", () => {
 });
 
 describe("teardownCoordinator", () => {
-	test("calls ov coordinator cleanup", async () => {
+	test("calls ov coordinator stop", async () => {
 		const calls: string[][] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			calls.push(cmd);
@@ -327,7 +327,7 @@ describe("teardownCoordinator", () => {
 
 		await teardownCoordinator("coordinator", testRepo, exec);
 
-		expect(calls[0]).toEqual(["ov", "coordinator", "cleanup", "coordinator"]);
+		expect(calls[0]).toEqual(["ov", "coordinator", "stop"]);
 	});
 
 	test("checks out main after cleanup", async () => {
