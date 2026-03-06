@@ -398,10 +398,11 @@ describe("buildDispatchMessage", () => {
 		expect(msg).toContain("priority:P1");
 	});
 
-	test("includes stop instruction after task completion", () => {
+	test("includes critical ordering: close seeds issue last", () => {
 		const msg = buildDispatchMessage("overstory-a1b2", "greenhouse/overstory-a1b2", testContext);
-		expect(msg).toContain("Stop");
-		expect(msg).toContain("Do NOT pick up additional work");
+		expect(msg).toContain("Close** the seeds issue LAST");
+		expect(msg).toContain("Do NOT close it until");
+		expect(msg).toContain("ship an empty PR");
 	});
 
 	test("handles missing optional fields gracefully", () => {
