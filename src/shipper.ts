@@ -88,7 +88,7 @@ export async function shipRun(
 	// gh pr create prints the URL to stdout, extract PR number from it
 	const prUrl = prOut.trim();
 	const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
-	const prNumber = prNumberMatch ? Number.parseInt(prNumberMatch[1], 10) : 0;
+	const prNumber = prNumberMatch?.[1] ? Number.parseInt(prNumberMatch[1], 10) : 0;
 
 	// Comment on the GitHub issue with the PR link
 	await exec(

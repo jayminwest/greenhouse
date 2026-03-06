@@ -8,6 +8,7 @@ import {
 	printBudget,
 	printDebug,
 	printElapsed,
+	printError,
 	printInfo,
 	printRunFull,
 	printRunOneLine,
