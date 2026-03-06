@@ -93,7 +93,7 @@ describe("loadConfig", () => {
 		// Defaults
 		expect(config.poll_interval_minutes).toBe(10);
 		expect(config.daily_cap).toBe(5);
-		expect(config.dispatch.capability).toBe("lead");
+		expect(config.dispatch.capability).toBe("coordinator");
 		expect(config.dispatch.max_concurrent).toBe(2);
 		expect(config.dispatch.monitor_interval_seconds).toBe(30);
 		expect(config.dispatch.run_timeout_minutes).toBe(60);
