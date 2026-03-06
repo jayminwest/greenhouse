@@ -58,6 +58,9 @@ export async function writeAllRuns(runs: RunState[], projectRoot: string): Promi
 
 /**
  * Check if a GitHub issue has already been ingested.
+ * Returns true for ANY existing run for that (ghRepo, ghIssueId) pair,
+ * including failed runs. Use getFailedRetryableRuns() to find runs that
+ * should be retried.
  */
 export async function isIngested(
 	projectRoot: string,
@@ -65,9 +68,15 @@ export async function isIngested(
 	ghIssueId: number,
 ): Promise<boolean> {
 	const runs = await readAllRuns(projectRoot);
-	return runs.some(
-		(r) => r.ghRepo === ghRepo && r.ghIssueId === ghIssueId && r.status !== "failed",
-	);
+	return runs.some((r) => r.ghRepo === ghRepo && r.ghIssueId === ghIssueId);
+}
+
+/**
+ * Get all failed runs that are eligible for retry (retryable: true).
+ */
+export async function getFailedRetryableRuns(projectRoot: string): Promise<RunState[]> {
+	const runs = await readAllRuns(projectRoot);
+	return runs.filter((r) => r.status === "failed" && r.retryable === true);
 }
 
 /**

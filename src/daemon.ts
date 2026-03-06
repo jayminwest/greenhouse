@@ -6,33 +6,20 @@ import { ingestIssue } from "./ingester.ts";
 import { checkRunStatus } from "./monitor.ts";
 import { pollIssues } from "./poller.ts";
 import { shipRun } from "./shipper.ts";
-import { appendRun, getActiveRuns, isIngested, readAllRuns, updateRun } from "./state.ts";
+import {
+	appendRun,
+	getActiveRuns,
+	getFailedRetryableRuns,
+	isIngested,
+	readAllRuns,
+	updateRun,
+} from "./state.ts";
+import { teardownCoordinator } from "./teardown.ts";
 import type { DaemonConfig, ExecFn, GhIssue, RepoConfig, RunState } from "./types.ts";
 
 function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: object): void {
 	const entry = { ts: new Date().toISOString(), level, msg, ...extra };
 	process.stderr.write(`${JSON.stringify(entry)}\n`);
-}
-
-/**
- * Merge the agent's worktree branch into the greenhouse merge branch.
- * Uses `ov merge --branch <agent> --into <mergeBranch>` so overstory's
- * tiered conflict resolver handles the merge.
- */
-async function mergeAgentBranch(
-	agentBranch: string,
-	mergeBranch: string,
-	repo: RepoConfig,
-	exec: ExecFn,
-): Promise<void> {
-	const { exitCode, stderr } = await exec(
-		["ov", "merge", "--branch", agentBranch, "--into", mergeBranch],
-		{ cwd: repo.project_root },
-	);
-
-	if (exitCode !== 0) {
-		throw new Error(`ov merge failed: ${stderr.trim()}`);
-	}
 }
 
 /**
@@ -76,28 +63,15 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 					log("debug", "Run status", { seedsId: run.seedsId, state });
 
 					if (completed) {
-						// Merge agent branch into greenhouse merge branch
-						if (run.branch && run.mergeBranch) {
+						// Teardown coordinator (clean up worktrees, sessions)
+						if (run.agentName) {
 							try {
-								await mergeAgentBranch(run.branch, run.mergeBranch, repo, exec);
+								await teardownCoordinator(run.agentName, repo, exec);
 							} catch (err) {
-								log("error", "Merge into greenhouse branch failed", {
+								log("warn", "Coordinator teardown failed (non-fatal)", {
 									seedsId: run.seedsId,
-									agentBranch: run.branch,
-									mergeBranch: run.mergeBranch,
 									error: err instanceof Error ? err.message : String(err),
 								});
-								await updateRun(
-									run.ghIssueId,
-									run.ghRepo,
-									{
-										status: "failed",
-										error: `Merge failed: ${err instanceof Error ? err.message : String(err)}`,
-										retryable: true,
-									},
-									projectRoot,
-								);
-								continue;
 							}
 						}
 						const updated = await updateRun(
@@ -179,6 +153,53 @@ export async function runPollCycle(
 	for (const repo of config.repos) {
 		const runs = await getActiveRuns(repo.project_root);
 		activeCount += runs.filter((r) => r.ghRepo === `${repo.owner}/${repo.repo}`).length;
+	}
+
+	// 2.5. Retry failed retryable runs
+	for (const repo of config.repos) {
+		if (activeCount >= config.dispatch.max_concurrent) break;
+
+		const projectRoot = repo.project_root;
+		const repoStr = `${repo.owner}/${repo.repo}`;
+		const failedRuns = (await getFailedRetryableRuns(projectRoot)).filter(
+			(r) => r.ghRepo === repoStr,
+		);
+
+		for (const run of failedRuns) {
+			if (activeCount >= config.dispatch.max_concurrent) break;
+
+			try {
+				const { agentName, branch, mergeBranch } = await dispatchRun(run.seedsId, repo, exec);
+				await updateRun(
+					run.ghIssueId,
+					run.ghRepo,
+					{
+						status: "running",
+						agentName,
+						branch,
+						mergeBranch,
+						dispatchedAt: new Date().toISOString(),
+						error: undefined,
+						retryable: undefined,
+					},
+					projectRoot,
+				);
+				log("info", "Retrying failed run", {
+					seedsId: run.seedsId,
+					ghIssueId: run.ghIssueId,
+					agentName,
+					branch,
+					mergeBranch,
+				});
+				activeCount++;
+			} catch (err) {
+				log("error", "Retry dispatch failed", {
+					seedsId: run.seedsId,
+					ghIssueId: run.ghIssueId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+		}
 	}
 
 	// 3. Dispatch new issues if under max_concurrent
