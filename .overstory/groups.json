@@ -37,8 +37,18 @@
 			"greenhouse-366f",
 			"greenhouse-88c9"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T00:49:06.551Z",
+		"completedAt": "2026-03-06T00:57:22.769Z"
+	},
+	{
+		"id": "group-763c9941",
+		"name": "cli-global-options",
+		"memberIssueIds": [
+			"greenhouse-3d2b"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T01:16:48.292Z",
 		"completedAt": null
 	}
 ]
