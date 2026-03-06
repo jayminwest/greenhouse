@@ -4,7 +4,7 @@
 project:
   name: greenhouse
   root: /Users/jayminwest/Projects/os-eco/greenhouse
-  canonicalBranch: main
+  canonicalBranch: greenhouse/greenhouse-49d2
   qualityGates:
     - name: Tests
       command: bun test
@@ -46,6 +46,11 @@ watchdog:
   staleThresholdMs: 300000
   zombieThresholdMs: 600000
   nudgeIntervalMs: 60000
+coordinator:
+  exitTriggers:
+    allAgentsDone: false
+    taskTrackerEmpty: false
+    onShutdownSignal: false
 models:
 logging:
   verbose: false
