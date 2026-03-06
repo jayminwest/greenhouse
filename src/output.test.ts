@@ -1,16 +1,17 @@
-/**
- * Tests for output.ts — global CLI option state and helpers.
- */
-
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
 	isJsonMode,
 	isQuietMode,
 	isTimingMode,
 	isVerboseMode,
+	outputJson,
+	printBudget,
 	printDebug,
 	printElapsed,
 	printInfo,
+	printRunFull,
+	printRunOneLine,
+	printSuccess,
 	printWarning,
 	setJsonMode,
 	setQuietMode,
@@ -18,141 +19,87 @@ import {
 	setVerboseMode,
 	startTiming,
 } from "./output.ts";
+import type { DailyBudget, RunState } from "./types.ts";
 
-describe("quiet mode", () => {
-	beforeEach(() => {
-		setQuietMode(false);
-		setJsonMode(false);
+function makeRun(overrides: Partial<RunState> = {}): RunState {
+	return {
+		ghIssueId: 42,
+		ghRepo: "jayminwest/greenhouse",
+		ghTitle: "Test issue title",
+		ghLabels: ["status:triaged"],
+		seedsId: "greenhouse-1a2b",
+		status: "running",
+		discoveredAt: "2026-01-01T00:00:00Z",
+		updatedAt: "2026-01-01T01:00:00Z",
+		...overrides,
+	};
+}
+
+function makeBudget(overrides: Partial<DailyBudget> = {}): DailyBudget {
+	return {
+		date: "2026-01-01",
+		dispatched: 2,
+		cap: 5,
+		remaining: 3,
+		...overrides,
+	};
+}
+
+// Reset all mode flags after each test
+afterEach(() => {
+	setJsonMode(false);
+	setQuietMode(false);
+	setVerboseMode(false);
+	setTimingMode(false);
+});
+
+describe("mode getters/setters", () => {
+	test("setJsonMode / isJsonMode", () => {
+		expect(isJsonMode()).toBe(false);
+		setJsonMode(true);
+		expect(isJsonMode()).toBe(true);
 	});
 
-	afterEach(() => {
-		setQuietMode(false);
-		setJsonMode(false);
-	});
-
-	it("isQuietMode returns false by default", () => {
+	test("setQuietMode / isQuietMode", () => {
 		expect(isQuietMode()).toBe(false);
-	});
-
-	it("setQuietMode toggles state", () => {
 		setQuietMode(true);
 		expect(isQuietMode()).toBe(true);
-		setQuietMode(false);
-		expect(isQuietMode()).toBe(false);
 	});
 
-	it("printInfo is suppressed in quiet mode", () => {
-		const spy = spyOn(console, "log").mockImplementation(() => {});
-		setQuietMode(true);
-		printInfo("test message");
-		expect(spy.mock.calls.length).toBe(0);
-		spy.mockRestore();
-	});
-
-	it("printInfo outputs when quiet mode is off", () => {
-		const spy = spyOn(console, "log").mockImplementation(() => {});
-		setQuietMode(false);
-		printInfo("test message");
-		expect(spy.mock.calls.length).toBe(1);
-		spy.mockRestore();
-	});
-
-	it("printWarning is suppressed in quiet mode", () => {
-		const spy = spyOn(console, "log").mockImplementation(() => {});
-		setQuietMode(true);
-		printWarning("warning message");
-		expect(spy.mock.calls.length).toBe(0);
-		spy.mockRestore();
-	});
-
-	it("printWarning outputs when quiet mode is off", () => {
-		const spy = spyOn(console, "log").mockImplementation(() => {});
-		setQuietMode(false);
-		printWarning("warning message");
-		expect(spy.mock.calls.length).toBe(1);
-		spy.mockRestore();
-	});
-});
-
-describe("verbose mode", () => {
-	beforeEach(() => {
-		setVerboseMode(false);
-	});
-
-	afterEach(() => {
-		setVerboseMode(false);
-	});
-
-	it("isVerboseMode returns false by default", () => {
+	test("setVerboseMode / isVerboseMode", () => {
 		expect(isVerboseMode()).toBe(false);
-	});
-
-	it("setVerboseMode toggles state", () => {
 		setVerboseMode(true);
 		expect(isVerboseMode()).toBe(true);
-		setVerboseMode(false);
-		expect(isVerboseMode()).toBe(false);
 	});
 
-	it("printDebug is suppressed when verbose mode is off", () => {
-		const spy = spyOn(console, "log").mockImplementation(() => {});
-		setVerboseMode(false);
-		printDebug("debug message");
-		expect(spy.mock.calls.length).toBe(0);
-		spy.mockRestore();
-	});
-
-	it("printDebug outputs when verbose mode is on", () => {
-		const spy = spyOn(console, "log").mockImplementation(() => {});
-		setVerboseMode(true);
-		printDebug("debug message");
-		expect(spy.mock.calls.length).toBe(1);
-		spy.mockRestore();
+	test("setTimingMode / isTimingMode", () => {
+		expect(isTimingMode()).toBe(false);
+		setTimingMode(true);
+		expect(isTimingMode()).toBe(true);
 	});
 });
 
-describe("timing mode", () => {
-	beforeEach(() => {
-		setTimingMode(false);
-		setJsonMode(false);
-	});
-
-	afterEach(() => {
-		setTimingMode(false);
-		setJsonMode(false);
-	});
-
-	it("isTimingMode returns false by default", () => {
-		expect(isTimingMode()).toBe(false);
-	});
-
-	it("setTimingMode toggles state", () => {
-		setTimingMode(true);
-		expect(isTimingMode()).toBe(true);
-		setTimingMode(false);
-		expect(isTimingMode()).toBe(false);
-	});
-
-	it("printElapsed is suppressed when timing mode is off", () => {
+describe("timing", () => {
+	test("printElapsed is suppressed when timing mode is off", () => {
 		const spy = spyOn(console, "log").mockImplementation(() => {});
 		setTimingMode(false);
 		printElapsed();
-		expect(spy.mock.calls.length).toBe(0);
+		expect(spy).toHaveBeenCalledTimes(0);
 		spy.mockRestore();
 	});
 
-	it("printElapsed outputs when timing mode is on", () => {
+	test("printElapsed outputs when timing mode is on", () => {
 		const spy = spyOn(console, "log").mockImplementation(() => {});
 		startTiming();
 		setTimingMode(true);
 		printElapsed();
-		expect(spy.mock.calls.length).toBe(1);
+		expect(spy).toHaveBeenCalledTimes(1);
 		const output = String(spy.mock.calls[0]);
 		expect(output).toContain("s");
 		spy.mockRestore();
 	});
 
-	it("printElapsed uses custom label", () => {
+	test("printElapsed uses custom label", () => {
 		const spy = spyOn(console, "log").mockImplementation(() => {});
 		startTiming();
 		setTimingMode(true);
@@ -162,42 +109,205 @@ describe("timing mode", () => {
 		spy.mockRestore();
 	});
 
-	it("printElapsed writes to stderr in JSON mode", () => {
+	test("printElapsed writes to stderr in JSON mode", () => {
 		const spy = spyOn(process.stderr, "write").mockImplementation(() => true);
 		startTiming();
 		setTimingMode(true);
 		setJsonMode(true);
 		printElapsed();
-		expect(spy.mock.calls.length).toBe(1);
+		expect(spy).toHaveBeenCalledTimes(1);
 		const output = String(spy.mock.calls[0]);
 		expect(output).toContain("s");
 		spy.mockRestore();
 	});
 });
 
-describe("isJsonMode", () => {
-	beforeEach(() => {
-		setJsonMode(false);
-	});
-
-	afterEach(() => {
-		setJsonMode(false);
-	});
-
-	it("returns false by default", () => {
-		expect(isJsonMode()).toBe(false);
-	});
-
-	it("returns true after setJsonMode(true)", () => {
-		setJsonMode(true);
-		expect(isJsonMode()).toBe(true);
-	});
-
-	it("printInfo is suppressed in JSON mode", () => {
+describe("printSuccess", () => {
+	test("outputs when no mode set", () => {
 		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printSuccess("hello");
+		expect(spy).toHaveBeenCalledTimes(1);
+		spy.mockRestore();
+	});
+
+	test("suppressed in json mode", () => {
 		setJsonMode(true);
-		printInfo("should not appear");
-		expect(spy.mock.calls.length).toBe(0);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printSuccess("hello");
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+
+	test("suppressed in quiet mode", () => {
+		setQuietMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printSuccess("hello");
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+});
+
+describe("printError", () => {
+	test("always outputs (not suppressed by quiet)", () => {
+		setQuietMode(true);
+		const spy = spyOn(console, "error").mockImplementation(() => {});
+		printError("something broke");
+		expect(spy).toHaveBeenCalledTimes(1);
+		spy.mockRestore();
+	});
+
+	test("always outputs (not suppressed by json mode)", () => {
+		setJsonMode(true);
+		const spy = spyOn(console, "error").mockImplementation(() => {});
+		printError("something broke");
+		expect(spy).toHaveBeenCalledTimes(1);
+		spy.mockRestore();
+	});
+});
+
+describe("printWarning", () => {
+	test("outputs when no mode set", () => {
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printWarning("careful");
+		expect(spy).toHaveBeenCalledTimes(1);
+		spy.mockRestore();
+	});
+
+	test("suppressed in quiet mode", () => {
+		setQuietMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printWarning("careful");
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+
+	test("suppressed in json mode", () => {
+		setJsonMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printWarning("careful");
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+});
+
+describe("printInfo", () => {
+	test("outputs when no mode set", () => {
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printInfo("info");
+		expect(spy).toHaveBeenCalledTimes(1);
+		spy.mockRestore();
+	});
+
+	test("suppressed in quiet mode", () => {
+		setQuietMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printInfo("info");
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+
+	test("suppressed in json mode", () => {
+		setJsonMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printInfo("info");
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+});
+
+describe("printDebug", () => {
+	test("suppressed when verbose mode off", () => {
+		const spy = spyOn(process.stderr, "write").mockImplementation(() => true);
+		printDebug("debug message");
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+
+	test("outputs to stderr when verbose mode on", () => {
+		setVerboseMode(true);
+		const spy = spyOn(process.stderr, "write").mockImplementation(() => true);
+		printDebug("debug message");
+		expect(spy).toHaveBeenCalledTimes(1);
+		const call = spy.mock.calls[0]?.[0];
+		expect(String(call)).toContain("debug message");
+		spy.mockRestore();
+	});
+});
+
+describe("printRunOneLine", () => {
+	test("outputs when no mode set", () => {
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printRunOneLine(makeRun());
+		expect(spy).toHaveBeenCalledTimes(1);
+		spy.mockRestore();
+	});
+
+	test("suppressed in quiet mode", () => {
+		setQuietMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printRunOneLine(makeRun());
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+
+	test("suppressed in json mode", () => {
+		setJsonMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printRunOneLine(makeRun());
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+});
+
+describe("printRunFull", () => {
+	test("outputs when no mode set", () => {
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printRunFull(makeRun());
+		expect(spy).toHaveBeenCalled();
+		spy.mockRestore();
+	});
+
+	test("suppressed in quiet mode", () => {
+		setQuietMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printRunFull(makeRun());
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+});
+
+describe("printBudget", () => {
+	test("outputs when no mode set", () => {
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printBudget(makeBudget());
+		expect(spy).toHaveBeenCalledTimes(1);
+		spy.mockRestore();
+	});
+
+	test("suppressed in quiet mode", () => {
+		setQuietMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printBudget(makeBudget());
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+
+	test("suppressed in json mode", () => {
+		setJsonMode(true);
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		printBudget(makeBudget());
+		expect(spy).toHaveBeenCalledTimes(0);
+		spy.mockRestore();
+	});
+});
+
+describe("outputJson", () => {
+	test("always outputs JSON", () => {
+		const spy = spyOn(console, "log").mockImplementation(() => {});
+		outputJson({ key: "value" });
+		expect(spy).toHaveBeenCalledTimes(1);
+		const output = spy.mock.calls[0]?.[0] as string;
+		expect(JSON.parse(output)).toEqual({ key: "value" });
 		spy.mockRestore();
 	});
 });

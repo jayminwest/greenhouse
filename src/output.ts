@@ -59,17 +59,12 @@ export function printElapsed(label = "Elapsed"): void {
 	}
 }
 
-export function printDebug(msg: string): void {
-	if (!_verbose) return;
-	console.log(`${chalk.gray("·")} ${chalk.gray(msg)}`);
-}
-
 export function outputJson(data: unknown): void {
 	console.log(JSON.stringify(data, null, 2));
 }
 
 export function printSuccess(msg: string): void {
-	if (_json) return;
+	if (_json || _quiet) return;
 	console.log(`${brand("✓")} ${brand(msg)}`);
 }
 
@@ -87,6 +82,11 @@ export function printInfo(msg: string): void {
 	console.log(`${muted("·")} ${msg}`);
 }
 
+export function printDebug(msg: string): void {
+	if (!_verbose) return;
+	process.stderr.write(`${muted("[debug]")} ${msg}\n`);
+}
+
 const STATUS_ICONS: Record<string, string> = {
 	pending: muted("○"),
 	ingested: accent("◎"),
@@ -97,7 +97,7 @@ const STATUS_ICONS: Record<string, string> = {
 };
 
 export function printRunOneLine(run: RunState): void {
-	if (_json) return;
+	if (_json || _quiet) return;
 	const icon = STATUS_ICONS[run.status] ?? muted("?");
 	const repo = muted(run.ghRepo);
 	const id = accent.bold(`#${run.ghIssueId}`);
@@ -107,7 +107,7 @@ export function printRunOneLine(run: RunState): void {
 }
 
 export function printRunFull(run: RunState): void {
-	if (_json) return;
+	if (_json || _quiet) return;
 	const statusColor =
 		run.status === "shipped"
 			? brand
@@ -133,7 +133,7 @@ export function printRunFull(run: RunState): void {
 }
 
 export function printBudget(budget: DailyBudget): void {
-	if (_json) return;
+	if (_json || _quiet) return;
 	const bar =
 		budget.remaining === 0 ? chalk.red("EXHAUSTED") : brand(`${budget.remaining} remaining`);
 	console.log(
