@@ -50,6 +50,8 @@ describe("shipRun", () => {
 		const calls: string[][] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			calls.push(cmd);
+			// git diff --quiet: non-zero exit = branch has commits ahead of main
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 1, stdout: "", stderr: "" };
 			// git push returns empty
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
 			// gh pr create prints URL to stdout
@@ -68,6 +70,7 @@ describe("shipRun", () => {
 		let pushCmd: string[] = [];
 		let prCmd: string[] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 1, stdout: "", stderr: "" };
 			if (cmd[0] === "git") {
 				pushCmd = cmd;
 				return { exitCode: 0, stdout: "", stderr: "" };
@@ -96,6 +99,7 @@ describe("shipRun", () => {
 	test("falls back to agent branch when mergeBranch is not set", async () => {
 		let pushCmd: string[] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 1, stdout: "", stderr: "" };
 			if (cmd[0] === "git") {
 				pushCmd = cmd;
 				return { exitCode: 0, stdout: "", stderr: "" };
@@ -117,13 +121,18 @@ describe("shipRun", () => {
 	});
 
 	test("throws when run has no branch", async () => {
-		const exec = async (): Promise<ExecResult> => ({ exitCode: 0, stdout: "", stderr: "" });
+		const exec = async (_cmd: string[]): Promise<ExecResult> => ({
+			exitCode: 1,
+			stdout: "",
+			stderr: "",
+		});
 		const run = makeRun({ branch: undefined, mergeBranch: undefined });
 		await expect(shipRun(run, testRepo, testConfig, exec)).rejects.toThrow("no branch to push");
 	});
 
 	test("throws when git push fails", async () => {
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 1, stdout: "", stderr: "" };
 			if (cmd[0] === "git") return { exitCode: 1, stdout: "", stderr: "push rejected" };
 			return { exitCode: 0, stdout: "", stderr: "" };
 		};
@@ -132,6 +141,7 @@ describe("shipRun", () => {
 
 	test("throws when gh pr create fails", async () => {
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 1, stdout: "", stderr: "" };
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
 			return { exitCode: 1, stdout: "", stderr: "PR already exists" };
 		};
@@ -143,6 +153,7 @@ describe("shipRun", () => {
 	test("passes correct repo to gh pr create", async () => {
 		let prCmd: string[] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 1, stdout: "", stderr: "" };
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
 			if (cmd.includes("pr")) {
 				prCmd = cmd;
@@ -160,5 +171,57 @@ describe("shipRun", () => {
 		expect(prCmd).toContain("--repo");
 		const repoIdx = prCmd.indexOf("--repo");
 		expect(prCmd[repoIdx + 1]).toBe("jayminwest/overstory");
+	});
+
+	test("throws when merge branch has no commits ahead of main", async () => {
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			// git diff --quiet exits 0 when there are NO differences
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 0, stdout: "", stderr: "" };
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+		await expect(shipRun(makeRun(), testRepo, testConfig, exec)).rejects.toThrow(
+			"no commits ahead of main",
+		);
+	});
+
+	test("runs gh pr merge --auto --squash when auto_merge is enabled", async () => {
+		const calls: string[][] = [];
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 1, stdout: "", stderr: "" };
+			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
+			if (cmd.includes("pr") && cmd.includes("create"))
+				return { exitCode: 0, stdout: "https://github.com/test/pull/55\n", stderr: "" };
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		const configWithAutoMerge: DaemonConfig = {
+			...testConfig,
+			shipping: { ...testConfig.shipping, auto_merge: true },
+		};
+
+		await shipRun(makeRun(), testRepo, configWithAutoMerge, exec);
+
+		const mergeCall = calls.find((c) => c.includes("merge") && c.includes("--auto"));
+		expect(mergeCall).toBeDefined();
+		expect(mergeCall).toContain("--squash");
+		expect(mergeCall).toContain("55");
+	});
+
+	test("does NOT run gh pr merge when auto_merge is not set", async () => {
+		const calls: string[][] = [];
+		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+			calls.push(cmd);
+			if (cmd[0] === "git" && cmd[1] === "diff") return { exitCode: 1, stdout: "", stderr: "" };
+			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
+			if (cmd.includes("pr") && cmd.includes("create"))
+				return { exitCode: 0, stdout: "https://github.com/test/pull/55\n", stderr: "" };
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		await shipRun(makeRun(), testRepo, testConfig, exec);
+
+		const mergeCall = calls.find((c) => c.includes("merge") && c.includes("--auto"));
+		expect(mergeCall).toBeUndefined();
 	});
 });
