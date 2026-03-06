@@ -150,8 +150,18 @@
 			"greenhouse-a426",
 			"greenhouse-aedd"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T20:26:48.637Z",
+		"completedAt": "2026-03-06T20:35:16.881Z"
+	},
+	{
+		"id": "group-5e5713f3",
+		"name": "supervisor-phase2",
+		"memberIssueIds": [
+			"greenhouse-7cb5"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T20:36:30.958Z",
 		"completedAt": null
 	}
 ]
