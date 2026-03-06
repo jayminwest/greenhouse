@@ -1,0 +1,36 @@
+version: "1"
+
+repos:
+  - owner: jayminwest
+    repo: greenhouse
+    labels:
+      - agent-ready
+    project_root: /Users/jayminwest/Projects/os-eco/greenhouse
+
+poll_interval_minutes: 1
+daily_cap: 5
+
+dispatch:
+  capability: lead
+  max_concurrent: 2
+  monitor_interval_seconds: 30
+  run_timeout_minutes: 60
+
+shipping:
+  auto_push: true
+  pr_template: |
+    ## Greenhouse Auto-PR
+
+    **GitHub Issue:** #{github_issue_number}
+    **Seeds Task:** {seeds_task_id}
+
+    ### Summary
+    {agent_summary}
+
+    ### Quality Gates
+    - [ ] Tests pass
+    - [ ] Lint clean
+    - [ ] Typecheck clean
+
+    ---
+    Automated by [Greenhouse](https://github.com/jayminwest/greenhouse)

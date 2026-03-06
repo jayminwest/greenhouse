@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { checkRunStatus } from "./monitor.ts";
-import type { AgentStatus, ExecResult, RepoConfig, StatusResult } from "./types.ts";
+import type { CoordinatorStatus, ExecResult, RepoConfig, SdIssue } from "./types.ts";
 
 const testRepo: RepoConfig = {
 	owner: "jayminwest",
@@ -9,103 +9,92 @@ const testRepo: RepoConfig = {
 	project_root: "/tmp/test-repo",
 };
 
-function makeExec(result: ExecResult) {
-	return async (_cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => result;
+function makeExec(...results: [ExecResult, ...ExecResult[]]) {
+	let call = 0;
+	return async (_cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
+		const result = (
+			call < results.length ? results[call] : results[results.length - 1]
+		) as ExecResult;
+		call++;
+		return result;
+	};
 }
 
-function makeStatusResult(agents: AgentStatus[]): StatusResult {
+function makeSdIssue(status: string): SdIssue {
+	return {
+		id: "greenhouse-test",
+		title: "Test issue",
+		status,
+		createdAt: "2026-03-06T00:00:00.000Z",
+		updatedAt: "2026-03-06T00:00:00.000Z",
+	};
+}
+
+function makeCoordStatus(running: boolean): CoordinatorStatus {
 	return {
 		success: true,
-		command: "status",
-		currentRunId: null,
-		agents,
-		worktrees: [],
-		tmuxSessions: [],
-		unreadMailCount: 0,
-		mergeQueueCount: 0,
-		recentMetricsCount: 0,
+		command: "coordinator status",
+		running,
+		watchdogRunning: false,
+		monitorRunning: false,
 	};
 }
 
 describe("checkRunStatus", () => {
-	test("returns completed=true for 'completed' state", async () => {
-		const agents: AgentStatus[] = [
-			{
-				agentName: "lead-test",
-				capability: "lead",
-				taskId: "overstory-a1b2",
-				branch: "overstory/lead-test/overstory-a1b2",
-				state: "completed",
-			},
-		];
+	test("returns completed=true when seeds issue is closed", async () => {
 		const exec = makeExec({
 			exitCode: 0,
-			stdout: JSON.stringify(makeStatusResult(agents)),
+			stdout: JSON.stringify(makeSdIssue("closed")),
 			stderr: "",
 		});
 
-		const result = await checkRunStatus("overstory-a1b2", testRepo, exec);
+		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
 		expect(result.completed).toBe(true);
-		expect(result.state).toBe("completed");
+		expect(result.state).toBe("closed");
+		expect(result.failed).toBeUndefined();
 	});
 
-	test("returns completed=true for 'zombie' state", async () => {
-		const agents: AgentStatus[] = [
-			{
-				agentName: "lead-test",
-				capability: "lead",
-				taskId: "overstory-a1b2",
-				branch: "overstory/lead-test/overstory-a1b2",
-				state: "zombie",
-			},
-		];
-		const exec = makeExec({
-			exitCode: 0,
-			stdout: JSON.stringify(makeStatusResult(agents)),
-			stderr: "",
-		});
+	test("returns completed=false when issue is in_progress and coordinator running", async () => {
+		const exec = makeExec(
+			{ exitCode: 0, stdout: JSON.stringify(makeSdIssue("in_progress")), stderr: "" },
+			{ exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" },
+		);
 
-		const result = await checkRunStatus("overstory-a1b2", testRepo, exec);
-		expect(result.completed).toBe(true);
-	});
-
-	test("returns completed=false for 'working' state", async () => {
-		const agents: AgentStatus[] = [
-			{
-				agentName: "lead-test",
-				capability: "lead",
-				taskId: "overstory-a1b2",
-				branch: "overstory/lead-test/overstory-a1b2",
-				state: "working",
-			},
-		];
-		const exec = makeExec({
-			exitCode: 0,
-			stdout: JSON.stringify(makeStatusResult(agents)),
-			stderr: "",
-		});
-
-		const result = await checkRunStatus("overstory-a1b2", testRepo, exec);
+		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
 		expect(result.completed).toBe(false);
-		expect(result.state).toBe("working");
+		expect(result.state).toBe("in_progress");
 	});
 
-	test("returns completed=true when agent not found (already cleaned up)", async () => {
-		const exec = makeExec({
-			exitCode: 0,
-			stdout: JSON.stringify(makeStatusResult([])),
-			stderr: "",
-		});
+	test("returns failed+retryable when coordinator exits non-zero", async () => {
+		const exec = makeExec(
+			{ exitCode: 0, stdout: JSON.stringify(makeSdIssue("in_progress")), stderr: "" },
+			{ exitCode: 1, stdout: "", stderr: "coordinator: not found" },
+		);
 
-		const result = await checkRunStatus("overstory-missing", testRepo, exec);
+		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
 		expect(result.completed).toBe(true);
-		expect(result.state).toBe("completed");
+		expect(result.state).toBe("failed");
+		expect(result.failed).toBe(true);
+		expect(result.retryable).toBe(true);
 	});
 
-	test("throws on ov status failure", async () => {
-		const exec = makeExec({ exitCode: 1, stdout: "", stderr: "ov: not initialized" });
-		await expect(checkRunStatus("overstory-a1b2", testRepo, exec)).rejects.toThrow(
-			"ov status failed",
+	test("returns failed+retryable when coordinator reports running=false", async () => {
+		const exec = makeExec(
+			{ exitCode: 0, stdout: JSON.stringify(makeSdIssue("in_progress")), stderr: "" },
+			{ exitCode: 0, stdout: JSON.stringify(makeCoordStatus(false)), stderr: "" },
+		);
+
+		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
+		expect(result.completed).toBe(true);
+		expect(result.state).toBe("failed");
+		expect(result.failed).toBe(true);
+		expect(result.retryable).toBe(true);
+	});
+
+	test("throws when sd show fails", async () => {
+		const exec = makeExec({ exitCode: 1, stdout: "", stderr: "sd: issue not found" });
+		await expect(checkRunStatus("greenhouse-test", testRepo, exec)).rejects.toThrow(
+			"sd show failed",
 		);
 	});
 });

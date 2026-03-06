@@ -45,10 +45,10 @@ describe("parseYaml", () => {
 		const result = parseYaml(yaml);
 		const repos = result.repos as Array<Record<string, unknown>>;
 		expect(repos).toHaveLength(1);
-		expect(repos[0]!.owner).toBe("jayminwest");
-		expect(repos[0]!.repo).toBe("overstory");
-		expect(repos[0]!.labels).toEqual(["agent-ready"]);
-		expect(repos[0]!.project_root).toBe("/path/to/repo");
+		expect(repos[0]?.owner).toBe("jayminwest");
+		expect(repos[0]?.repo).toBe("overstory");
+		expect(repos[0]?.labels).toEqual(["agent-ready"]);
+		expect(repos[0]?.project_root).toBe("/path/to/repo");
 	});
 
 	test("parses block scalar |", () => {
@@ -87,13 +87,13 @@ describe("loadConfig", () => {
 		const config = await loadConfig(path);
 		expect(config.version).toBe("1");
 		expect(config.repos).toHaveLength(1);
-		expect(config.repos[0]!.owner).toBe("jayminwest");
-		expect(config.repos[0]!.repo).toBe("overstory");
-		expect(config.repos[0]!.labels).toEqual(["agent-ready"]);
+		expect(config.repos[0]?.owner).toBe("jayminwest");
+		expect(config.repos[0]?.repo).toBe("overstory");
+		expect(config.repos[0]?.labels).toEqual(["agent-ready"]);
 		// Defaults
 		expect(config.poll_interval_minutes).toBe(10);
 		expect(config.daily_cap).toBe(5);
-		expect(config.dispatch.capability).toBe("lead");
+		expect(config.dispatch.capability).toBe("coordinator");
 		expect(config.dispatch.max_concurrent).toBe(2);
 		expect(config.dispatch.monitor_interval_seconds).toBe(30);
 		expect(config.dispatch.run_timeout_minutes).toBe(60);
@@ -157,7 +157,7 @@ repos:
 		const path = writeConfig("config.yaml", content);
 		const config = await loadConfig(path);
 		expect(config.repos).toHaveLength(2);
-		expect(config.repos[1]!.repo).toBe("seeds");
-		expect(config.repos[1]!.labels).toEqual(["agent-ready", "bug"]);
+		expect(config.repos[1]?.repo).toBe("seeds");
+		expect(config.repos[1]?.labels).toEqual(["agent-ready", "bug"]);
 	});
 });

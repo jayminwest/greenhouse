@@ -9,8 +9,36 @@
 			"greenhouse-d36d",
 			"greenhouse-f18a"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-05T22:43:44.378Z",
+		"completedAt": "2026-03-05T23:13:45.808Z"
+	},
+	{
+		"id": "group-c6a2cb6a",
+		"name": "greenhouse-cli-commands",
+		"memberIssueIds": [
+			"greenhouse-68c7",
+			"greenhouse-9d70",
+			"greenhouse-3f9e",
+			"greenhouse-a2b7"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-05T23:45:43.065Z",
+		"completedAt": "2026-03-05T23:55:03.060Z"
+	},
+	{
+		"id": "group-b0f75cc1",
+		"name": "coordinator-lifecycle-rewrite",
+		"memberIssueIds": [
+			"greenhouse-7896",
+			"greenhouse-24bd",
+			"greenhouse-192b",
+			"greenhouse-c5a4",
+			"greenhouse-366f",
+			"greenhouse-88c9"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T00:49:06.551Z",
 		"completedAt": null
 	}
 ]

@@ -27,7 +27,9 @@ function renderPrBody(run: RunState, config: DaemonConfig): string {
 }
 
 /**
- * Push the agent branch and create a GitHub PR.
+ * Push the greenhouse merge branch and create a GitHub PR.
+ * Uses mergeBranch (greenhouse-controlled) instead of the agent's worktree branch,
+ * since overstory may have already cleaned up the worktree branch.
  * Returns PR URL and number.
  */
 export async function shipRun(
@@ -36,7 +38,8 @@ export async function shipRun(
 	config: DaemonConfig,
 	exec: ExecFn = defaultExec,
 ): Promise<ShipResult> {
-	const branch = run.branch;
+	// Prefer mergeBranch (greenhouse-controlled), fall back to agent branch for backwards compat
+	const branch = run.mergeBranch ?? run.branch;
 	if (!branch) {
 		throw new Error(`Run ${run.seedsId} has no branch to push`);
 	}
