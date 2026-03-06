@@ -138,7 +138,7 @@ daily_cap: 5
 
 # Overstory dispatch
 dispatch:
-  capability: lead
+  capability: coordinator
   max_concurrent: 2
   monitor_interval_seconds: 30
   run_timeout_minutes: 60
@@ -194,7 +194,7 @@ interface RunState {
   retryable?: boolean;         // Whether this failure can be retried
 
   // Overstory
-  agentName?: string;          // Lead agent name from ov sling
+  agentName?: string;          // Coordinator agent name from ov sling
   branch?: string;             // Git branch name (e.g., "overstory/lead-42/overstory-a1b2")
 
   // Shipping
@@ -235,7 +235,7 @@ interface DaemonConfig {
   poll_interval_minutes: number;    // Default: 10
   daily_cap: number;                // Default: 5
   dispatch: {
-    capability: string;             // Default: "lead"
+    capability: string;             // Default: "coordinator"
     max_concurrent: number;         // Default: 2
     monitor_interval_seconds: number; // Default: 30
     run_timeout_minutes: number;    // Default: 60
@@ -409,9 +409,9 @@ sd create \
   --description "From GitHub issue #42\n\n<issue body>" \
   --json
 
-# 3. Dispatch overstory lead
+# 3. Dispatch overstory coordinator
 ov sling <seeds-task-id> \
-  --capability lead \
+  --capability coordinator \
   --json
 
 # 4. Monitor (poll ov status until done)
