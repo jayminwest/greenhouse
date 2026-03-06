@@ -61,5 +61,12 @@ export async function checkRunStatus(
 		return { completed: true, state: "failed", failed: true, retryable: true };
 	}
 
+	const ACTIVE_STATES = new Set(["working", "starting"]);
+	const hasActiveAgent = taskAgents.some((a) => ACTIVE_STATES.has(a.state));
+	if (!hasActiveAgent) {
+		// All task agents in terminal states but issue still open — failed and retryable
+		return { completed: true, state: "failed", failed: true, retryable: true };
+	}
+
 	return { completed: false, state: issue.status };
 }

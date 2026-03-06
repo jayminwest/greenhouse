@@ -153,6 +153,29 @@ describe("checkRunStatus", () => {
 		expect(result.retryable).toBe(true);
 	});
 
+	test("returns failed+retryable when all task agents are in terminal states", async () => {
+		const exec = makeExec(
+			{ exitCode: 0, stdout: JSON.stringify(makeSdShowResponse("in_progress")), stderr: "" },
+			{
+				exitCode: 0,
+				stdout: JSON.stringify(
+					makeOvStatus([
+						{ taskId: "greenhouse-test", capability: "lead", state: "zombie" },
+						{ taskId: "greenhouse-test", capability: "builder", state: "completed" },
+						{ taskId: "", capability: "coordinator", state: "working" },
+					]),
+				),
+				stderr: "",
+			},
+		);
+
+		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
+		expect(result.completed).toBe(true);
+		expect(result.state).toBe("failed");
+		expect(result.failed).toBe(true);
+		expect(result.retryable).toBe(true);
+	});
+
 	test("throws when sd show fails", async () => {
 		const exec = makeExec({ exitCode: 1, stdout: "", stderr: "sd: issue not found" });
 		await expect(checkRunStatus("greenhouse-test", testRepo, exec)).rejects.toThrow(
