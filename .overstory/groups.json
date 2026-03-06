@@ -86,5 +86,17 @@
 		"status": "completed",
 		"createdAt": "2026-03-06T15:48:36.310Z",
 		"completedAt": "2026-03-06T17:25:19.802Z"
+	},
+	{
+		"id": "group-40b927d6",
+		"name": "shipping-improvements",
+		"memberIssueIds": [
+			"greenhouse-82af",
+			"greenhouse-c5de",
+			"greenhouse-1b17"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T17:27:28.078Z",
+		"completedAt": null
 	}
 ]
