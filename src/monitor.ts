@@ -1,5 +1,5 @@
 import { defaultExec } from "./exec.ts";
-import type { CoordinatorStatus, ExecFn, RepoConfig, SdIssue } from "./types.ts";
+import type { ExecFn, OvStatusResult, RepoConfig, SdIssue } from "./types.ts";
 
 export interface MonitorResult {
 	completed: boolean;
@@ -11,10 +11,11 @@ export interface MonitorResult {
 /**
  * Check the status of a run by polling `sd show <seedsId> --json`.
  * A run is complete when the seeds issue status is "closed".
- * Also checks coordinator health via `ov coordinator status --json`:
- * if the coordinator is not running (state=completed, zombie, or tmux dead)
- * with the issue still open, returns completed=true with failed=true and
- * retryable=true so the daemon can reschedule.
+ * Also checks agent health via `ov status --json`: if no task-specific agents
+ * (lead/builder) with matching taskId are found while the issue is still open,
+ * the run has failed and is retryable so the daemon can reschedule.
+ * The coordinator is excluded from this check — it is long-lived and always
+ * shows state=working regardless of individual task progress.
  */
 export async function checkRunStatus(
 	taskId: string,
@@ -37,19 +38,26 @@ export async function checkRunStatus(
 		return { completed: true, state: "closed" };
 	}
 
-	// Coordinator health check: detect if coordinator died mid-run
-	const coordResult = await exec(["ov", "coordinator", "status", "--json"], {
+	// Agent health check: detect if all task-specific agents have exited mid-run.
+	// Uses ov status --json which lists all agents; filters by taskId to find
+	// lead/builder agents working on this specific task. The coordinator is
+	// excluded — it is long-lived and always reports state=working.
+	const statusResult = await exec(["ov", "status", "--json"], {
 		cwd: repo.project_root,
 	});
 
-	if (coordResult.exitCode !== 0) {
-		// Coordinator command failed — coordinator is gone
+	if (statusResult.exitCode !== 0) {
+		// ov status failed — assume agents are gone
 		return { completed: true, state: "failed", failed: true, retryable: true };
 	}
 
-	const coordStatus = JSON.parse(coordResult.stdout) as CoordinatorStatus;
-	if (!coordStatus.running) {
-		// Coordinator is not running but issue still open — failed and retryable
+	const ovStatus = JSON.parse(statusResult.stdout) as OvStatusResult;
+	const taskAgents = ovStatus.agents.filter(
+		(a) => a.taskId === taskId && a.capability !== "coordinator",
+	);
+
+	if (taskAgents.length === 0) {
+		// No task-specific agents found but issue is still open — failed and retryable
 		return { completed: true, state: "failed", failed: true, retryable: true };
 	}
 

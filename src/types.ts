@@ -154,6 +154,35 @@ export interface CoordinatorStatus {
 	monitorRunning: boolean;
 }
 
+// === ov status --json response ===
+
+export interface OvAgentInfo {
+	id: string;
+	agentName: string;
+	capability: string;
+	worktreePath: string;
+	branchName: string;
+	taskId: string;
+	tmuxSession: string;
+	state: string;
+	pid: number;
+	parentAgent: string | null;
+	depth: number;
+	runId: string | null;
+	startedAt: string;
+	lastActivity: string;
+	escalationLevel: number;
+	stalledSince: string | null;
+	transcriptPath: string | null;
+}
+
+export interface OvStatusResult {
+	success: boolean;
+	command: string;
+	currentRunId: string;
+	agents: OvAgentInfo[];
+}
+
 // === ov coordinator check-complete --json response ===
 
 export interface TriggerResult {

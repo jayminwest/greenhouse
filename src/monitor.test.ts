@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { checkRunStatus } from "./monitor.ts";
-import type { CoordinatorStatus, ExecResult, RepoConfig, SdIssue } from "./types.ts";
+import type { ExecResult, OvStatusResult, RepoConfig, SdIssue } from "./types.ts";
 
 const testRepo: RepoConfig = {
 	owner: "jayminwest",
@@ -34,13 +34,32 @@ function makeSdShowResponse(status: string): { success: boolean; command: string
 	};
 }
 
-function makeCoordStatus(running: boolean): CoordinatorStatus {
+function makeOvStatus(
+	agents: Array<{ taskId: string; capability: string; state: string }>,
+): OvStatusResult {
 	return {
 		success: true,
-		command: "coordinator status",
-		running,
-		watchdogRunning: false,
-		monitorRunning: false,
+		command: "status",
+		currentRunId: "run-test",
+		agents: agents.map((a, i) => ({
+			id: `session-${i}`,
+			agentName: `agent-${i}`,
+			capability: a.capability,
+			worktreePath: "/tmp/worktree",
+			branchName: "main",
+			taskId: a.taskId,
+			tmuxSession: `overstory-${i}`,
+			state: a.state,
+			pid: 1000 + i,
+			parentAgent: null,
+			depth: 1,
+			runId: "run-test",
+			startedAt: "2026-03-06T00:00:00.000Z",
+			lastActivity: "2026-03-06T00:00:00.000Z",
+			escalationLevel: 0,
+			stalledSince: null,
+			transcriptPath: null,
+		})),
 	};
 }
 
@@ -58,10 +77,19 @@ describe("checkRunStatus", () => {
 		expect(result.failed).toBeUndefined();
 	});
 
-	test("returns completed=false when issue is in_progress and coordinator running", async () => {
+	test("returns completed=false when issue is in_progress and task agents are running", async () => {
 		const exec = makeExec(
 			{ exitCode: 0, stdout: JSON.stringify(makeSdShowResponse("in_progress")), stderr: "" },
-			{ exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" },
+			{
+				exitCode: 0,
+				stdout: JSON.stringify(
+					makeOvStatus([
+						{ taskId: "greenhouse-test", capability: "lead", state: "working" },
+						{ taskId: "", capability: "coordinator", state: "working" },
+					]),
+				),
+				stderr: "",
+			},
 		);
 
 		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
@@ -69,10 +97,17 @@ describe("checkRunStatus", () => {
 		expect(result.state).toBe("in_progress");
 	});
 
-	test("returns failed+retryable when coordinator exits non-zero", async () => {
+	test("ignores coordinator when checking task agents", async () => {
+		// Coordinator has empty taskId and capability=coordinator — should not count as a task agent
 		const exec = makeExec(
 			{ exitCode: 0, stdout: JSON.stringify(makeSdShowResponse("in_progress")), stderr: "" },
-			{ exitCode: 1, stdout: "", stderr: "coordinator: not found" },
+			{
+				exitCode: 0,
+				stdout: JSON.stringify(
+					makeOvStatus([{ taskId: "", capability: "coordinator", state: "working" }]),
+				),
+				stderr: "",
+			},
 		);
 
 		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
@@ -82,10 +117,33 @@ describe("checkRunStatus", () => {
 		expect(result.retryable).toBe(true);
 	});
 
-	test("returns failed+retryable when coordinator reports running=false", async () => {
+	test("returns failed+retryable when ov status exits non-zero", async () => {
 		const exec = makeExec(
 			{ exitCode: 0, stdout: JSON.stringify(makeSdShowResponse("in_progress")), stderr: "" },
-			{ exitCode: 0, stdout: JSON.stringify(makeCoordStatus(false)), stderr: "" },
+			{ exitCode: 1, stdout: "", stderr: "ov: not found" },
+		);
+
+		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
+		expect(result.completed).toBe(true);
+		expect(result.state).toBe("failed");
+		expect(result.failed).toBe(true);
+		expect(result.retryable).toBe(true);
+	});
+
+	test("returns failed+retryable when no task-specific agents found", async () => {
+		// Only agents for a different taskId — no agents for greenhouse-test
+		const exec = makeExec(
+			{ exitCode: 0, stdout: JSON.stringify(makeSdShowResponse("in_progress")), stderr: "" },
+			{
+				exitCode: 0,
+				stdout: JSON.stringify(
+					makeOvStatus([
+						{ taskId: "greenhouse-other", capability: "lead", state: "working" },
+						{ taskId: "", capability: "coordinator", state: "working" },
+					]),
+				),
+				stderr: "",
+			},
 		);
 
 		const result = await checkRunStatus("greenhouse-test", testRepo, exec);
