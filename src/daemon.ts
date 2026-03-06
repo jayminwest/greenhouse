@@ -1,9 +1,11 @@
+import { mkdir } from "node:fs/promises";
 import { BudgetTracker } from "./budget.ts";
 import { loadConfig } from "./config.ts";
 import { dispatchRun } from "./dispatcher.ts";
 import { defaultExec } from "./exec.ts";
 import { ingestIssue } from "./ingester.ts";
 import { checkRunStatus } from "./monitor.ts";
+import { pidFilePath, removePid, writePid } from "./pid.ts";
 import { pollIssues } from "./poller.ts";
 import { cleanupAfterShip, shipRun } from "./shipper.ts";
 import {
@@ -16,6 +18,8 @@ import {
 } from "./state.ts";
 import { teardownCoordinator } from "./teardown.ts";
 import type { DaemonConfig, ExecFn, GhIssue, RepoConfig, RunState } from "./types.ts";
+
+const MAX_RETRY_ATTEMPTS = 3;
 
 function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: object): void {
 	const entry = { ts: new Date().toISOString(), level, msg, ...extra };
@@ -211,6 +215,7 @@ async function advanceShipping(
 export async function runPollCycle(
 	config: DaemonConfig,
 	exec: ExecFn = defaultExec,
+	retryAttempts: Map<string, number> = new Map(),
 ): Promise<void> {
 	// 1. Monitor active runs first
 	await monitorActiveRuns(config, exec);
@@ -234,6 +239,29 @@ export async function runPollCycle(
 
 		for (const run of failedRuns) {
 			if (activeCount >= config.dispatch.max_concurrent) break;
+
+			const attempts = (retryAttempts.get(run.seedsId) ?? 0) + 1;
+			if (attempts > MAX_RETRY_ATTEMPTS) {
+				log("warn", "Max retries exceeded, marking as non-retryable", {
+					event: "run.max_retries_exceeded",
+					seedsId: run.seedsId,
+					ghIssueId: run.ghIssueId,
+					attempts: MAX_RETRY_ATTEMPTS,
+				});
+				await updateRun(
+					run.ghIssueId,
+					run.ghRepo,
+					{
+						status: "failed",
+						error: `Max retry attempts (${MAX_RETRY_ATTEMPTS}) exceeded`,
+						retryable: false,
+					},
+					projectRoot,
+				);
+				retryAttempts.delete(run.seedsId);
+				continue;
+			}
+			retryAttempts.set(run.seedsId, attempts);
 
 			try {
 				const { agentName, mergeBranch, mailId } = await dispatchRun(run.seedsId, repo, exec);
@@ -411,8 +439,14 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 		daily_cap: config.daily_cap,
 	});
 
+	// Write PID file so `grhs status` can detect the daemon in foreground mode.
+	const pidPath = pidFilePath();
+	await mkdir(".greenhouse", { recursive: true });
+	await writePid(pidPath, process.pid);
+
 	let running = true;
 	let currentConfig = config;
+	const retryAttempts = new Map<string, number>();
 
 	const shutdown = () => {
 		log("info", "Shutdown signal received, finishing current cycle");
@@ -436,29 +470,33 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 	process.on("SIGTERM", shutdown);
 	process.on("SIGHUP", reloadConfig);
 
-	while (running) {
-		try {
-			await runPollCycle(currentConfig);
-		} catch (err) {
-			log("error", "Poll cycle error", {
-				error: err instanceof Error ? err.message : String(err),
+	try {
+		while (running) {
+			try {
+				await runPollCycle(currentConfig, defaultExec, retryAttempts);
+			} catch (err) {
+				log("error", "Poll cycle error", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+
+			if (!running) break;
+
+			const sleepMs = currentConfig.poll_interval_minutes * 60 * 1000;
+			log("info", "Sleeping until next poll", {
+				next_poll_in_minutes: config.poll_interval_minutes,
 			});
+
+			// Sleep in small intervals so we can respond to signals promptly
+			const intervalMs = 5000;
+			let slept = 0;
+			while (slept < sleepMs && running) {
+				await new Promise((r) => setTimeout(r, Math.min(intervalMs, sleepMs - slept)));
+				slept += intervalMs;
+			}
 		}
-
-		if (!running) break;
-
-		const sleepMs = currentConfig.poll_interval_minutes * 60 * 1000;
-		log("info", "Sleeping until next poll", {
-			next_poll_in_minutes: config.poll_interval_minutes,
-		});
-
-		// Sleep in small intervals so we can respond to signals promptly
-		const intervalMs = 5000;
-		let slept = 0;
-		while (slept < sleepMs && running) {
-			await new Promise((r) => setTimeout(r, Math.min(intervalMs, sleepMs - slept)));
-			slept += intervalMs;
-		}
+	} finally {
+		await removePid(pidPath);
 	}
 
 	log("info", "Greenhouse daemon stopped");
