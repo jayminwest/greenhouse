@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { appendRun, readState, updateRun, writeAllRuns } from "./state.ts";
+import {
+	appendRun,
+	getFailedRetryableRuns,
+	isIngested,
+	readState,
+	updateRun,
+	writeAllRuns,
+} from "./state.ts";
 import type { RunState } from "./types.ts";
 
 const TMP = join(import.meta.dir, ".test-state-tmp");
@@ -39,7 +46,7 @@ describe("readState", () => {
 		await appendRun(run, TMP);
 		const runs = await readState(TMP);
 		expect(runs).toHaveLength(1);
-		expect(runs[0]!.ghIssueId).toBe(42);
+		expect(runs[0]?.ghIssueId).toBe(42);
 	});
 
 	test("deduplicates by (ghRepo, ghIssueId) — last wins", async () => {
@@ -49,7 +56,7 @@ describe("readState", () => {
 		await appendRun(run2, TMP);
 		const runs = await readState(TMP);
 		expect(runs).toHaveLength(1);
-		expect(runs[0]!.status).toBe("running");
+		expect(runs[0]?.status).toBe("running");
 	});
 
 	test("keeps distinct (ghRepo, ghIssueId) pairs", async () => {
@@ -85,7 +92,7 @@ describe("updateRun", () => {
 		const updated = await updateRun(42, "jayminwest/overstory", { status: "running" }, TMP);
 		expect(updated.status).toBe("running");
 		const runs = await readState(TMP);
-		expect(runs[0]!.status).toBe("running");
+		expect(runs[0]?.status).toBe("running");
 	});
 
 	test("sets updatedAt automatically", async () => {
@@ -110,6 +117,50 @@ describe("updateRun", () => {
 	});
 });
 
+describe("isIngested", () => {
+	test("returns false for unknown issue", async () => {
+		expect(await isIngested(TMP, "owner/repo", 999)).toBe(false);
+	});
+
+	test("returns true for pending run", async () => {
+		await appendRun(makeRun({ ghRepo: "owner/repo", ghIssueId: 1, status: "pending" }), TMP);
+		expect(await isIngested(TMP, "owner/repo", 1)).toBe(true);
+	});
+
+	test("returns true for failed run", async () => {
+		await appendRun(makeRun({ ghRepo: "owner/repo", ghIssueId: 2, status: "failed" }), TMP);
+		expect(await isIngested(TMP, "owner/repo", 2)).toBe(true);
+	});
+
+	test("returns true for shipped run", async () => {
+		await appendRun(makeRun({ ghRepo: "owner/repo", ghIssueId: 3, status: "shipped" }), TMP);
+		expect(await isIngested(TMP, "owner/repo", 3)).toBe(true);
+	});
+});
+
+describe("getFailedRetryableRuns", () => {
+	test("returns empty array when no failed runs", async () => {
+		await appendRun(makeRun({ status: "running" }), TMP);
+		const failed = await getFailedRetryableRuns(TMP);
+		expect(failed).toEqual([]);
+	});
+
+	test("returns only failed retryable runs", async () => {
+		await appendRun(
+			makeRun({ ghIssueId: 1, seedsId: "a", status: "failed", retryable: true }),
+			TMP,
+		);
+		await appendRun(
+			makeRun({ ghIssueId: 2, seedsId: "b", status: "failed", retryable: false }),
+			TMP,
+		);
+		await appendRun(makeRun({ ghIssueId: 3, seedsId: "c", status: "running" }), TMP);
+		const failed = await getFailedRetryableRuns(TMP);
+		expect(failed).toHaveLength(1);
+		expect(failed[0]?.ghIssueId).toBe(1);
+	});
+});
+
 describe("writeAllRuns", () => {
 	test("overwrites state with new run list", async () => {
 		await appendRun(makeRun({ ghIssueId: 1, seedsId: "a" }), TMP);
@@ -118,6 +169,6 @@ describe("writeAllRuns", () => {
 		await writeAllRuns([single], TMP);
 		const runs = await readState(TMP);
 		expect(runs).toHaveLength(1);
-		expect(runs[0]!.ghIssueId).toBe(99);
+		expect(runs[0]?.ghIssueId).toBe(99);
 	});
 });
