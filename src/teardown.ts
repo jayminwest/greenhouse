@@ -2,15 +2,15 @@ import type { ExecFn, RepoConfig } from "./types.ts";
 
 /**
  * Tear down the coordinator for a completed run.
- * Cleans up overstory worktrees and tmux sessions associated with the agent.
+ * Stops the overstory coordinator process so it does not continue picking up work unsupervised.
  * Best-effort: logs warning on failure but does not throw.
  */
 export async function teardownCoordinator(
-	agentName: string,
+	_agentName: string,
 	repo: RepoConfig,
 	exec: ExecFn,
 ): Promise<void> {
-	await exec(["ov", "coordinator", "cleanup", agentName], {
+	await exec(["ov", "coordinator", "stop"], {
 		cwd: repo.project_root,
 	}).catch(() => {});
 }
