@@ -231,3 +231,18 @@ export interface ShipResult {
 	prUrl: string;
 	prNumber: number;
 }
+
+// === Supervisor ===
+
+export interface SupervisorConfig {
+	seedsId: string;
+	mergeBranch: string;
+	repo: RepoConfig;
+	config: DaemonConfig;
+	specPath?: string;
+}
+
+export interface SpawnSupervisorResult {
+	sessionName: string;
+	pid: number;
+}
