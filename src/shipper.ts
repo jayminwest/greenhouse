@@ -57,7 +57,7 @@ export async function shipRun(
 	const prTitle = `${run.ghTitle} (#${run.ghIssueId})`;
 	const prBody = renderPrBody(run, config);
 
-	// Create the PR
+	// Create the PR — gh pr create prints the PR URL to stdout
 	const {
 		exitCode: prCode,
 		stdout: prOut,
@@ -77,8 +77,6 @@ export async function shipRun(
 			prTitle,
 			"--body",
 			prBody,
-			"--json",
-			"number,url",
 		],
 		{ cwd: repo.project_root },
 	);
@@ -87,7 +85,10 @@ export async function shipRun(
 		throw new Error(`gh pr create failed: ${prErr.trim()}`);
 	}
 
-	const pr = JSON.parse(prOut) as { number: number; url: string };
+	// gh pr create prints the URL to stdout, extract PR number from it
+	const prUrl = prOut.trim();
+	const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
+	const prNumber = prNumberMatch ? Number.parseInt(prNumberMatch[1], 10) : 0;
 
 	// Comment on the GitHub issue with the PR link
 	await exec(
@@ -99,10 +100,10 @@ export async function shipRun(
 			"--repo",
 			`${repo.owner}/${repo.repo}`,
 			"--body",
-			`Greenhouse opened PR #${pr.number} for this issue. Review and merge when ready.`,
+			`Greenhouse opened PR #${prNumber} for this issue. Review and merge when ready.`,
 		],
 		{ cwd: repo.project_root },
 	);
 
-	return { prUrl: pr.url, prNumber: pr.number };
+	return { prUrl, prNumber };
 }

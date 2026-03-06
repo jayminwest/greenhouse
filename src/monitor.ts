@@ -30,7 +30,8 @@ export async function checkRunStatus(
 		throw new Error(`sd show failed: ${stderr.trim()}`);
 	}
 
-	const issue = JSON.parse(stdout) as SdIssue;
+	const parsed = JSON.parse(stdout) as { issue: SdIssue } | SdIssue;
+	const issue: SdIssue = "issue" in parsed ? parsed.issue : parsed;
 
 	if (issue.status === "closed") {
 		return { completed: true, state: "closed" };

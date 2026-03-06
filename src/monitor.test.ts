@@ -20,13 +20,17 @@ function makeExec(...results: [ExecResult, ...ExecResult[]]) {
 	};
 }
 
-function makeSdIssue(status: string): SdIssue {
+function makeSdShowResponse(status: string): { success: boolean; command: string; issue: SdIssue } {
 	return {
-		id: "greenhouse-test",
-		title: "Test issue",
-		status,
-		createdAt: "2026-03-06T00:00:00.000Z",
-		updatedAt: "2026-03-06T00:00:00.000Z",
+		success: true,
+		command: "show",
+		issue: {
+			id: "greenhouse-test",
+			title: "Test issue",
+			status,
+			createdAt: "2026-03-06T00:00:00.000Z",
+			updatedAt: "2026-03-06T00:00:00.000Z",
+		},
 	};
 }
 
@@ -44,7 +48,7 @@ describe("checkRunStatus", () => {
 	test("returns completed=true when seeds issue is closed", async () => {
 		const exec = makeExec({
 			exitCode: 0,
-			stdout: JSON.stringify(makeSdIssue("closed")),
+			stdout: JSON.stringify(makeSdShowResponse("closed")),
 			stderr: "",
 		});
 
@@ -56,7 +60,7 @@ describe("checkRunStatus", () => {
 
 	test("returns completed=false when issue is in_progress and coordinator running", async () => {
 		const exec = makeExec(
-			{ exitCode: 0, stdout: JSON.stringify(makeSdIssue("in_progress")), stderr: "" },
+			{ exitCode: 0, stdout: JSON.stringify(makeSdShowResponse("in_progress")), stderr: "" },
 			{ exitCode: 0, stdout: JSON.stringify(makeCoordStatus(true)), stderr: "" },
 		);
 
@@ -67,7 +71,7 @@ describe("checkRunStatus", () => {
 
 	test("returns failed+retryable when coordinator exits non-zero", async () => {
 		const exec = makeExec(
-			{ exitCode: 0, stdout: JSON.stringify(makeSdIssue("in_progress")), stderr: "" },
+			{ exitCode: 0, stdout: JSON.stringify(makeSdShowResponse("in_progress")), stderr: "" },
 			{ exitCode: 1, stdout: "", stderr: "coordinator: not found" },
 		);
 
@@ -80,7 +84,7 @@ describe("checkRunStatus", () => {
 
 	test("returns failed+retryable when coordinator reports running=false", async () => {
 		const exec = makeExec(
-			{ exitCode: 0, stdout: JSON.stringify(makeSdIssue("in_progress")), stderr: "" },
+			{ exitCode: 0, stdout: JSON.stringify(makeSdShowResponse("in_progress")), stderr: "" },
 			{ exitCode: 0, stdout: JSON.stringify(makeCoordStatus(false)), stderr: "" },
 		);
 

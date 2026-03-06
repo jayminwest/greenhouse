@@ -45,25 +45,22 @@ function makeRun(overrides?: Partial<RunState>): RunState {
 
 describe("shipRun", () => {
 	test("pushes mergeBranch and creates PR, returns prUrl and prNumber", async () => {
-		const prResponse = JSON.stringify({
-			number: 99,
-			url: "https://github.com/jayminwest/overstory/pull/99",
-		});
+		const prUrl = "https://github.com/jayminwest/overstory/pull/99";
 
 		const calls: string[][] = [];
 		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
 			calls.push(cmd);
 			// git push returns empty
 			if (cmd[0] === "git") return { exitCode: 0, stdout: "", stderr: "" };
-			// gh pr create returns PR JSON
-			if (cmd.includes("pr")) return { exitCode: 0, stdout: prResponse, stderr: "" };
+			// gh pr create prints URL to stdout
+			if (cmd.includes("pr")) return { exitCode: 0, stdout: `${prUrl}\n`, stderr: "" };
 			// gh issue comment
 			return { exitCode: 0, stdout: "", stderr: "" };
 		};
 
 		const result = await shipRun(makeRun(), testRepo, testConfig, exec);
 
-		expect(result.prUrl).toBe("https://github.com/jayminwest/overstory/pull/99");
+		expect(result.prUrl).toBe(prUrl);
 		expect(result.prNumber).toBe(99);
 	});
 
@@ -79,7 +76,7 @@ describe("shipRun", () => {
 				prCmd = cmd;
 				return {
 					exitCode: 0,
-					stdout: JSON.stringify({ number: 1, url: "https://github.com/test/pull/1" }),
+					stdout: "https://github.com/test/pull/1\n",
 					stderr: "",
 				};
 			}
@@ -106,7 +103,7 @@ describe("shipRun", () => {
 			if (cmd.includes("pr")) {
 				return {
 					exitCode: 0,
-					stdout: JSON.stringify({ number: 1, url: "https://github.com/test/pull/1" }),
+					stdout: "https://github.com/test/pull/1\n",
 					stderr: "",
 				};
 			}
@@ -151,7 +148,7 @@ describe("shipRun", () => {
 				prCmd = cmd;
 				return {
 					exitCode: 0,
-					stdout: JSON.stringify({ number: 1, url: "https://github.com/test/pull/1" }),
+					stdout: "https://github.com/test/pull/1\n",
 					stderr: "",
 				};
 			}
