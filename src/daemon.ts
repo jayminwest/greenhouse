@@ -1,26 +1,14 @@
 import { mkdir } from "node:fs/promises";
 import { BudgetTracker } from "./budget.ts";
-import { cleanupAfterFailure } from "./cleanup.ts";
 import { loadConfig } from "./config.ts";
 import { dispatchRun } from "./dispatcher.ts";
 import { defaultExec } from "./exec.ts";
 import { ingestIssue } from "./ingester.ts";
-import { checkRunStatus } from "./monitor.ts";
 import { pidFilePath, removePid, writePid } from "./pid.ts";
 import { pollIssues } from "./poller.ts";
-import { cleanupAfterShip, shipRun } from "./shipper.ts";
-import {
-	appendRun,
-	getActiveRuns,
-	getFailedRetryableRuns,
-	isIngested,
-	readAllRuns,
-	updateRun,
-} from "./state.ts";
-import { teardownCoordinator } from "./teardown.ts";
-import type { DaemonConfig, ExecFn, GhIssue, RepoConfig, RunState } from "./types.ts";
-
-const MAX_RETRY_ATTEMPTS = 3;
+import { appendRun, getActiveRuns, isIngested, readAllRuns, updateRun } from "./state.ts";
+import { isSupervisorAlive, spawnSupervisor } from "./supervisor.ts";
+import type { DaemonConfig, ExecFn, GhIssue, RunState } from "./types.ts";
 
 function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: object): void {
 	const entry = { ts: new Date().toISOString(), level, msg, ...extra };
@@ -28,11 +16,10 @@ function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: ob
 }
 
 /**
- * Monitor all active runs and advance their state.
- * Returns updated runs.
+ * Monitor all active supervisor sessions and advance their state when they exit.
+ * When a supervisor session exits, reads the final state it wrote to state.jsonl.
  */
-async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<void> {
-	// Group active runs by repo
+async function monitorSupervisors(config: DaemonConfig, exec: ExecFn): Promise<void> {
 	for (const repo of config.repos) {
 		const projectRoot = repo.project_root;
 		const activeRuns = (await getActiveRuns(projectRoot)).filter(
@@ -40,195 +27,46 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 		);
 
 		for (const run of activeRuns) {
+			if (!run.supervisorSessionName) continue;
+
 			try {
-				if (run.status === "running") {
-					// Check for timeout
-					const dispatchedAt = run.dispatchedAt ? new Date(run.dispatchedAt).getTime() : 0;
-					const timeoutMs = config.dispatch.run_timeout_minutes * 60 * 1000;
-					const runningMs = Date.now() - dispatchedAt;
-					if (runningMs > timeoutMs) {
-						log("warn", "Run timeout exceeded", {
-							event: "run.timeout",
-							seedsId: run.seedsId,
-							ghIssueId: run.ghIssueId,
-							duration_ms: runningMs,
-						});
-						await updateRun(
-							run.ghIssueId,
-							run.ghRepo,
-							{
-								status: "failed",
-								error: "run timeout exceeded",
-								retryable: true,
-							},
-							projectRoot,
-						);
-						try {
-							await cleanupAfterFailure(run, repo, "run timeout exceeded", true, exec);
-						} catch (cleanupErr) {
-							log("warn", "Post-failure cleanup failed (non-fatal)", {
-								seedsId: run.seedsId,
-								error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
-							});
-						}
-						continue;
-					}
+				const alive = await isSupervisorAlive(run.supervisorSessionName, exec);
+				if (alive) continue;
 
-					// Check completion
-					const result = await checkRunStatus(run.seedsId, repo, exec);
-					log("debug", "Run status", {
+				// Supervisor exited — read the final state it wrote to state.jsonl
+				const allRuns = await readAllRuns(projectRoot);
+				const latest = allRuns.filter((r) => r.seedsId === run.seedsId).at(-1);
+
+				if (latest && (latest.status === "shipped" || latest.status === "failed")) {
+					log("info", "Supervisor session exited", {
+						event: "supervisor.exited",
 						seedsId: run.seedsId,
-						state: result.state,
-						failed: result.failed,
+						status: latest.status,
 					});
-
-					if (result.completed && result.failed) {
-						// Agent(s) exited without closing the seeds issue — mark as failed
-						const failedNow = Date.now();
-						log("warn", "Run failed — agents exited without completing", {
-							event: "run.failed",
-							seedsId: run.seedsId,
-							ghIssueId: run.ghIssueId,
-							duration_ms: dispatchedAt ? failedNow - dispatchedAt : undefined,
-							retryable: result.retryable,
-						});
-						await updateRun(
-							run.ghIssueId,
-							run.ghRepo,
-							{
-								status: "failed",
-								error: "Agents exited without closing the seeds issue",
-								retryable: result.retryable ?? true,
-							},
-							projectRoot,
-						);
-						if (run.agentName) {
-							try {
-								await teardownCoordinator(run.agentName, repo, exec);
-							} catch (err) {
-								log("warn", "Coordinator teardown failed (non-fatal)", {
-									seedsId: run.seedsId,
-									error: err instanceof Error ? err.message : String(err),
-								});
-							}
-						}
-						try {
-							await cleanupAfterFailure(
-								run,
-								repo,
-								"Agents exited without closing the seeds issue",
-								result.retryable ?? true,
-								exec,
-							);
-						} catch (cleanupErr) {
-							log("warn", "Post-failure cleanup failed (non-fatal)", {
-								seedsId: run.seedsId,
-								error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
-							});
-						}
-					} else if (result.completed) {
-						// Seeds issue closed — success, proceed to shipping
-						if (run.agentName) {
-							try {
-								await teardownCoordinator(run.agentName, repo, exec);
-							} catch (err) {
-								log("warn", "Coordinator teardown failed (non-fatal)", {
-									seedsId: run.seedsId,
-									error: err instanceof Error ? err.message : String(err),
-								});
-							}
-						}
-						const completedNow = Date.now();
-						log("info", "Run completed", {
-							event: "run.completed",
-							seedsId: run.seedsId,
-							ghIssueId: run.ghIssueId,
-							duration_ms: dispatchedAt ? completedNow - dispatchedAt : undefined,
-						});
-						const updated = await updateRun(
-							run.ghIssueId,
-							run.ghRepo,
-							{
-								status: "shipping",
-								completedAt: new Date(completedNow).toISOString(),
-							},
-							projectRoot,
-						);
-						await advanceShipping(updated, repo, config, projectRoot, exec);
-					}
-				} else if (run.status === "shipping") {
-					// Retry shipping if it was interrupted
-					await advanceShipping(run, repo, config, projectRoot, exec);
+				} else {
+					// Supervisor exited without updating state — mark as failed
+					log("warn", "Supervisor exited without updating state", {
+						event: "supervisor.exited_no_state",
+						seedsId: run.seedsId,
+					});
+					await updateRun(
+						run.ghIssueId,
+						run.ghRepo,
+						{
+							status: "failed",
+							error: "Supervisor exited without updating state",
+							retryable: false,
+						},
+						projectRoot,
+					);
 				}
 			} catch (err) {
-				log("error", "Error monitoring run", {
+				log("error", "Error monitoring supervisor", {
 					seedsId: run.seedsId,
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}
 		}
-	}
-}
-
-async function advanceShipping(
-	run: RunState,
-	repo: RepoConfig,
-	config: DaemonConfig,
-	projectRoot: string,
-	exec: ExecFn,
-): Promise<void> {
-	try {
-		const { prUrl, prNumber } = await shipRun(run, repo, config, exec);
-		const shippedNow = Date.now();
-		const shippingMs = run.completedAt
-			? shippedNow - new Date(run.completedAt).getTime()
-			: undefined;
-		const totalMs = run.discoveredAt
-			? shippedNow - new Date(run.discoveredAt).getTime()
-			: undefined;
-		await updateRun(
-			run.ghIssueId,
-			run.ghRepo,
-			{
-				status: "shipped",
-				prUrl,
-				prNumber,
-				shippedAt: new Date(shippedNow).toISOString(),
-			},
-			projectRoot,
-		);
-		log("info", "Run shipped", {
-			event: "run.shipped",
-			seedsId: run.seedsId,
-			prUrl,
-			duration_ms: shippingMs,
-			total_ms: totalMs,
-		});
-		// Post-ship cleanup: restore repo to clean state (best-effort, non-fatal)
-		try {
-			await cleanupAfterShip(run, repo, exec);
-		} catch (err) {
-			log("warn", "Post-ship cleanup failed (non-fatal)", {
-				seedsId: run.seedsId,
-				error: err instanceof Error ? err.message : String(err),
-			});
-		}
-	} catch (err) {
-		log("error", "Shipping failed", {
-			event: "run.shipping_failed",
-			seedsId: run.seedsId,
-			error: err instanceof Error ? err.message : String(err),
-		});
-		await updateRun(
-			run.ghIssueId,
-			run.ghRepo,
-			{
-				status: "failed",
-				error: err instanceof Error ? err.message : String(err),
-				retryable: true,
-			},
-			projectRoot,
-		);
 	}
 }
 
@@ -238,87 +76,15 @@ async function advanceShipping(
 export async function runPollCycle(
 	config: DaemonConfig,
 	exec: ExecFn = defaultExec,
-	retryAttempts: Map<string, number> = new Map(),
 ): Promise<void> {
-	// 1. Monitor active runs first
-	await monitorActiveRuns(config, exec);
+	// 1. Monitor active supervisor sessions
+	await monitorSupervisors(config, exec);
 
 	// 2. Count currently active runs across all repos
 	let activeCount = 0;
 	for (const repo of config.repos) {
 		const runs = await getActiveRuns(repo.project_root);
 		activeCount += runs.filter((r) => r.ghRepo === `${repo.owner}/${repo.repo}`).length;
-	}
-
-	// 2.5. Retry failed retryable runs
-	for (const repo of config.repos) {
-		if (activeCount >= config.dispatch.max_concurrent) break;
-
-		const projectRoot = repo.project_root;
-		const repoStr = `${repo.owner}/${repo.repo}`;
-		const failedRuns = (await getFailedRetryableRuns(projectRoot)).filter(
-			(r) => r.ghRepo === repoStr,
-		);
-
-		for (const run of failedRuns) {
-			if (activeCount >= config.dispatch.max_concurrent) break;
-
-			const attempts = (retryAttempts.get(run.seedsId) ?? 0) + 1;
-			if (attempts > MAX_RETRY_ATTEMPTS) {
-				log("warn", "Max retries exceeded, marking as non-retryable", {
-					event: "run.max_retries_exceeded",
-					seedsId: run.seedsId,
-					ghIssueId: run.ghIssueId,
-					attempts: MAX_RETRY_ATTEMPTS,
-				});
-				await updateRun(
-					run.ghIssueId,
-					run.ghRepo,
-					{
-						status: "failed",
-						error: `Max retry attempts (${MAX_RETRY_ATTEMPTS}) exceeded`,
-						retryable: false,
-					},
-					projectRoot,
-				);
-				retryAttempts.delete(run.seedsId);
-				continue;
-			}
-			retryAttempts.set(run.seedsId, attempts);
-
-			try {
-				const { agentName, mergeBranch, mailId } = await dispatchRun(run.seedsId, repo, exec);
-				await updateRun(
-					run.ghIssueId,
-					run.ghRepo,
-					{
-						status: "running",
-						agentName,
-						mergeBranch,
-						dispatchedAt: new Date().toISOString(),
-						error: undefined,
-						retryable: undefined,
-					},
-					projectRoot,
-				);
-				log("info", "Retrying failed run", {
-					event: "run.retry_dispatched",
-					seedsId: run.seedsId,
-					ghIssueId: run.ghIssueId,
-					agentName,
-					mergeBranch,
-					mailId,
-				});
-				activeCount++;
-			} catch (err) {
-				log("error", "Retry dispatch failed", {
-					event: "run.retry_failed",
-					seedsId: run.seedsId,
-					ghIssueId: run.ghIssueId,
-					error: err instanceof Error ? err.message : String(err),
-				});
-			}
-		}
 	}
 
 	// 3. Dispatch new issues if under max_concurrent
@@ -398,11 +164,16 @@ export async function runPollCycle(
 						ghLabels: issue.labels.map((l) => l.name),
 					},
 				});
+
+				// Spawn supervisor to take ownership of the run through completion
+				const { sessionName } = await spawnSupervisor({ seedsId, mergeBranch, repo, config }, exec);
+
 				const runningRun: RunState = {
 					...ingestedRun,
 					status: "running",
 					agentName,
 					mergeBranch,
+					supervisorSessionName: sessionName,
 					dispatchedAt: now,
 					updatedAt: now,
 				};
@@ -413,6 +184,7 @@ export async function runPollCycle(
 					agentName,
 					mergeBranch,
 					mailId,
+					supervisorSession: sessionName,
 					duration_ms:
 						nowMs - new Date(ingestedRun.ingestedAt ?? ingestedRun.discoveredAt).getTime(),
 				});
@@ -469,7 +241,6 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 
 	let running = true;
 	let currentConfig = config;
-	const retryAttempts = new Map<string, number>();
 
 	const shutdown = () => {
 		log("info", "Shutdown signal received, finishing current cycle");
@@ -496,7 +267,7 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 	try {
 		while (running) {
 			try {
-				await runPollCycle(currentConfig, defaultExec, retryAttempts);
+				await runPollCycle(currentConfig, defaultExec);
 			} catch (err) {
 				log("error", "Poll cycle error", {
 					error: err instanceof Error ? err.message : String(err),
