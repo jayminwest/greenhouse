@@ -15,7 +15,6 @@ import { registerInitCommand } from "./commands/init.ts";
 import { registerLogsCommand } from "./commands/logs.ts";
 import { registerPollCommand } from "./commands/poll.ts";
 import { registerRunsCommand } from "./commands/runs.ts";
-import { registerShipCommand } from "./commands/ship.ts";
 import { registerStartCommand } from "./commands/start.ts";
 import { registerStatusCommand } from "./commands/status.ts";
 import { registerStopCommand } from "./commands/stop.ts";
@@ -90,7 +89,6 @@ registerDoctorCommand(program);
 registerRunsCommand(program);
 registerPollCommand(program);
 registerIngestCommand(program);
-registerShipCommand(program);
 registerLogsCommand(program);
 registerBudgetCommand(program);
 

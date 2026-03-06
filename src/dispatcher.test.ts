@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { buildDispatchMessage, dispatchRun } from "./dispatcher.ts";
-import { teardownCoordinator } from "./teardown.ts";
 import type {
 	CoordinatorSendResult,
 	CoordinatorStatus,
@@ -314,52 +313,6 @@ describe("dispatchRun session-branch setup", () => {
 		await expect(dispatchRun("overstory-a1b2", testRepo, exec)).rejects.toThrow(
 			"Failed to checkout merge branch",
 		);
-	});
-});
-
-describe("teardownCoordinator", () => {
-	test("calls ov coordinator stop", async () => {
-		const calls: string[][] = [];
-		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
-			calls.push(cmd);
-			return { exitCode: 0, stdout: "", stderr: "" };
-		};
-
-		await teardownCoordinator("coordinator", testRepo, exec);
-
-		expect(calls[0]).toEqual(["ov", "coordinator", "stop"]);
-	});
-
-	test("checks out main after cleanup", async () => {
-		const calls: string[][] = [];
-		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
-			calls.push(cmd);
-			return { exitCode: 0, stdout: "", stderr: "" };
-		};
-
-		await teardownCoordinator("coordinator", testRepo, exec);
-
-		const checkoutCall = calls.find((c) => c[0] === "git" && c[1] === "checkout");
-		expect(checkoutCall).toEqual(["git", "checkout", "main"]);
-	});
-
-	test("does not throw when cleanup fails", async () => {
-		const exec = async (_cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
-			return { exitCode: 1, stdout: "", stderr: "error" };
-		};
-
-		// should not throw
-		await teardownCoordinator("coordinator", testRepo, exec);
-	});
-
-	test("does not throw when git checkout main fails", async () => {
-		const exec = async (cmd: string[], _opts?: { cwd?: string }): Promise<ExecResult> => {
-			if (cmd[0] === "ov") return { exitCode: 0, stdout: "", stderr: "" };
-			return { exitCode: 1, stdout: "", stderr: "not a git repo" };
-		};
-
-		// should not throw
-		await teardownCoordinator("coordinator", testRepo, exec);
 	});
 });
 

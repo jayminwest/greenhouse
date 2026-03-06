@@ -226,13 +226,6 @@ export interface DispatchContext {
 	ghLabels?: string[];
 }
 
-// === Shipping ===
-
-export interface ShipResult {
-	prUrl: string;
-	prNumber: number;
-}
-
 // === Supervisor ===
 
 export interface SupervisorConfig {
