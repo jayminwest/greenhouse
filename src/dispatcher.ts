@@ -65,6 +65,7 @@ You are a coordinator agent dispatched by Greenhouse to implement a GitHub issue
 3. **Merge** all agent branches into the base branch (\`${mergeBranch}\`) when complete.
 4. **Close** the seeds issue when done: \`sd close ${seedsId} --reason "..."\`
 5. **Clean up** all worktrees used by agents when finished.
+6. **Stop** after completing this task and closing the seeds issue. Do NOT pick up additional work. Your session is scoped to this single task.
 
 The base branch \`${mergeBranch}\` is greenhouse's merge target. All work must land here before greenhouse can ship the PR.
 `;
