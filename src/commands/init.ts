@@ -29,7 +29,8 @@ shipping:
   pr_template: |
     ## Greenhouse Auto-PR
 
-    **GitHub Issue:** #{github_issue_number}
+    Closes #{github_issue_number}
+
     **Seeds Task:** {seeds_task_id}
 
     ### Summary

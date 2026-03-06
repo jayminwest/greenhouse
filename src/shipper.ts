@@ -3,11 +3,12 @@ import type { DaemonConfig, ExecFn, RepoConfig, RunState, ShipResult } from "./t
 
 const DEFAULT_PR_TEMPLATE = `## Greenhouse Auto-PR
 
-**GitHub Issue:** #{github_issue_number}
+Closes #{github_issue_number}
+
 **Seeds Task:** {seeds_task_id}
 
 ### Summary
-Automated by Greenhouse.
+{agent_summary}
 
 ### Quality Gates
 - [ ] Tests pass
