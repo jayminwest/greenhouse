@@ -25,5 +25,20 @@
 		"status": "completed",
 		"createdAt": "2026-03-05T23:45:43.065Z",
 		"completedAt": "2026-03-05T23:55:03.060Z"
+	},
+	{
+		"id": "group-b0f75cc1",
+		"name": "coordinator-lifecycle-rewrite",
+		"memberIssueIds": [
+			"greenhouse-7896",
+			"greenhouse-24bd",
+			"greenhouse-192b",
+			"greenhouse-c5a4",
+			"greenhouse-366f",
+			"greenhouse-88c9"
+		],
+		"status": "active",
+		"createdAt": "2026-03-06T00:49:06.551Z",
+		"completedAt": null
 	}
 ]
