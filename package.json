@@ -1,6 +1,6 @@
 {
 	"name": "@os-eco/greenhouse-cli",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Autonomous development daemon — polls GitHub, dispatches overstory runs, opens PRs",
 	"author": "Jaymin West",
 	"license": "MIT",
