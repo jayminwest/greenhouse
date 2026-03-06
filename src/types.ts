@@ -35,6 +35,7 @@ export interface RunState {
 	agentName?: string;
 	branch?: string;
 	mergeBranch?: string;
+	supervisorSessionName?: string;
 
 	// Shipping
 	prUrl?: string;
