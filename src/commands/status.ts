@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { Command } from "commander";
 import { computeBudget } from "../budget.ts";
 import { loadConfig } from "../config.ts";
+import { isProcessAlive } from "../pid.ts";
 import { getActiveRuns, readAllRuns } from "../state.ts";
 import type { DaemonConfig, RunState } from "../types.ts";
 
@@ -35,15 +36,6 @@ async function readPidFile(pidPath: string): Promise<PidEntry | null> {
 		// File missing or unreadable — daemon not running
 	}
 	return null;
-}
-
-function isProcessAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
 }
 
 function formatNextPoll(startedAt: string, pollIntervalMinutes: number): string {

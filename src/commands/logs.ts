@@ -112,7 +112,7 @@ async function followLog(logPath: string, startOffset: number): Promise<void> {
 	let offset = startOffset;
 	process.stdout.write(isTTY() ? "\x1b[90m--- following (Ctrl-C to stop) ---\x1b[0m\n" : "");
 
-	const poll = async (): Promise<void> => {
+	while (true) {
 		try {
 			const st = await stat(logPath);
 			if (st.size > offset) {
@@ -134,10 +134,7 @@ async function followLog(logPath: string, startOffset: number): Promise<void> {
 			// Log file may not exist yet — keep polling
 		}
 		await new Promise((r) => setTimeout(r, 500));
-		await poll();
-	};
-
-	await poll();
+	}
 }
 
 export function registerLogsCommand(program: Command): void {

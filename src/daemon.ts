@@ -105,6 +105,7 @@ async function monitorSupervisors(config: DaemonConfig, exec: ExecFn): Promise<v
 export async function runPollCycle(
 	config: DaemonConfig,
 	exec: ExecFn = defaultExec,
+	budget?: BudgetTracker,
 ): Promise<void> {
 	// 1. Monitor active supervisor sessions
 	await monitorSupervisors(config, exec);
@@ -117,11 +118,11 @@ export async function runPollCycle(
 	}
 
 	// 3. Dispatch new issues if under max_concurrent
-	const budget = new BudgetTracker(config.daily_cap);
+	const tracker = budget ?? new BudgetTracker(config.daily_cap);
 
 	for (const repo of config.repos) {
 		if (activeCount >= config.dispatch.max_concurrent) break;
-		if (!budget.hasCapacity()) {
+		if (!tracker.hasCapacity()) {
 			log("info", "Daily budget exhausted, skipping dispatch");
 			break;
 		}
@@ -144,7 +145,7 @@ export async function runPollCycle(
 
 		for (const issue of issues) {
 			if (activeCount >= config.dispatch.max_concurrent) break;
-			if (!budget.hasCapacity()) break;
+			if (!tracker.hasCapacity()) break;
 
 			// Skip already-ingested issues
 			const alreadyIngested = await isIngested(projectRoot, repoStr, issue.number);
@@ -219,7 +220,7 @@ export async function runPollCycle(
 						nowMs - new Date(ingestedRun.ingestedAt ?? ingestedRun.discoveredAt).getTime(),
 				});
 
-				budget.consume();
+				tracker.consume();
 				activeCount++;
 			} catch (err) {
 				log("error", "Dispatch failed", {
@@ -294,10 +295,12 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 	process.on("SIGTERM", shutdown);
 	process.on("SIGHUP", reloadConfig);
 
+	const budget = new BudgetTracker(currentConfig.daily_cap);
+
 	try {
 		while (running) {
 			try {
-				await runPollCycle(currentConfig, defaultExec);
+				await runPollCycle(currentConfig, defaultExec, budget);
 			} catch (err) {
 				log("error", "Poll cycle error", {
 					error: err instanceof Error ? err.message : String(err),
@@ -308,7 +311,7 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 
 			const sleepMs = currentConfig.poll_interval_minutes * 60 * 1000;
 			log("info", "Sleeping until next poll", {
-				next_poll_in_minutes: config.poll_interval_minutes,
+				next_poll_in_minutes: currentConfig.poll_interval_minutes,
 			});
 
 			// Sleep in small intervals so we can respond to signals promptly

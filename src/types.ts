@@ -70,6 +70,7 @@ export interface DaemonConfig {
 		max_concurrent: number;
 		monitor_interval_seconds: number;
 		run_timeout_minutes: number;
+		supervisor_model?: string;
 	};
 	shipping: {
 		auto_push: boolean;
