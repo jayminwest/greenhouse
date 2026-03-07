@@ -136,7 +136,7 @@ export function printWarning(msg: string): void {
 
 export function printInfo(msg: string): void {
 	if (_json || _quiet) return;
-	console.log(`${muted("·")} ${msg}`);
+	console.log(chalk.dim(`  ${msg}`));
 }
 
 export function printDebug(msg: string): void {
@@ -145,12 +145,12 @@ export function printDebug(msg: string): void {
 }
 
 const STATUS_ICONS: Record<string, string> = {
-	pending: chalk.green("-"),
-	ingested: chalk.cyan(">"),
-	running: chalk.cyan(">"),
-	shipping: chalk.cyan(">"),
-	shipped: chalk.dim("x"),
-	failed: chalk.yellow("!"),
+	pending: muted("○"),
+	ingested: chalk.green("-"),
+	running: chalk.cyan("◉"),
+	shipping: chalk.blue("⬆"),
+	shipped: brand("✓"),
+	failed: chalk.red("✗"),
 };
 
 export function printRunOneLine(run: RunState): void {

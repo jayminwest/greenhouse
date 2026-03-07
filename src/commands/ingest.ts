@@ -40,7 +40,8 @@ export function registerIngestCommand(program: Command): void {
 				process.stderr.write(
 					`Error: invalid GitHub issue URL: ${ghIssueUrl}\nExpected: https://github.com/owner/repo/issues/123\n`,
 				);
-				process.exit(1);
+				process.exitCode = 1;
+				return;
 			}
 
 			const { owner, repo, number } = parsed;
@@ -72,7 +73,8 @@ export function registerIngestCommand(program: Command): void {
 
 			if (exitCode !== 0) {
 				process.stderr.write(`Error: gh issue view failed: ${stderr.trim()}\n`);
-				process.exit(1);
+				process.exitCode = 1;
+				return;
 			}
 
 			const issue = JSON.parse(stdout) as GhIssue;
