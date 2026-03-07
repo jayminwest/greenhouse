@@ -18,6 +18,7 @@ dispatch:
 
 shipping:
   auto_push: true
+  auto_merge: true
   pr_template: |
     ## Greenhouse Auto-PR
 

@@ -67,7 +67,8 @@ function makeConfig(overrides: Partial<DaemonConfig["shipping"]> = {}): DaemonCo
 		},
 		shipping: {
 			auto_push: true,
-			pr_template: "## Greenhouse Auto-PR\n\n### Changes\n<!-- Summarize changes here -->",
+			pr_template:
+				"## Greenhouse Auto-PR\n\nCloses #{github_issue_number}\n\n**Seeds Task:** {seeds_task_id}\n\n### Summary\n{agent_summary}",
 			...overrides,
 		},
 	};
@@ -261,6 +262,7 @@ describe("shipRun", () => {
 	it("pushes branch and creates PR on success", async () => {
 		const run = makeRun();
 		const commands: string[][] = [];
+		let capturedPrBody = "";
 		const exec: ExecFn = async (cmd) => {
 			commands.push(cmd);
 			if (cmd.join(" ").startsWith("git worktree list")) {
@@ -273,6 +275,10 @@ describe("shipRun", () => {
 			}
 			if (cmd.join(" ").startsWith("git push origin greenhouse")) return ok();
 			if (cmd.join(" ").startsWith("gh pr create")) {
+				// Capture the --body arg
+				const bodyIdx = cmd.indexOf("--body");
+				if (bodyIdx !== -1 && cmd[bodyIdx + 1] !== undefined)
+					capturedPrBody = cmd[bodyIdx + 1] ?? "";
 				return ok("https://github.com/owner/repo/pull/99\n");
 			}
 			if (cmd.join(" ").startsWith("gh issue comment")) return ok();
@@ -295,6 +301,12 @@ describe("shipRun", () => {
 		expect(
 			commands.some((c) => c.includes("gh") && c.includes("issue") && c.includes("comment")),
 		).toBe(true);
+		// Verify template variables were substituted
+		expect(capturedPrBody).toContain("42"); // github_issue_number
+		expect(capturedPrBody).toContain("proj-001a"); // seeds_task_id
+		expect(capturedPrBody).not.toContain("{github_issue_number}");
+		expect(capturedPrBody).not.toContain("{seeds_task_id}");
+		expect(capturedPrBody).not.toContain("{agent_summary}");
 	});
 
 	it("triggers auto-merge when configured", async () => {
@@ -406,5 +418,19 @@ describe("cleanupAfterShip", () => {
 		const exec: ExecFn = async () => ok();
 		// Should not throw
 		await expect(cleanupAfterShip(run, makeRepoConfig(projectRoot), exec)).resolves.toBeUndefined();
+	});
+
+	it("throws when git checkout main fails (dirty worktree)", async () => {
+		const run = makeRun({ prNumber: 99 });
+		const exec: ExecFn = async (cmd) => {
+			if (cmd.includes("checkout") && cmd.includes("main")) {
+				return fail("error: Your local changes would be overwritten by checkout");
+			}
+			return ok();
+		};
+
+		await expect(cleanupAfterShip(run, makeRepoConfig(projectRoot), exec)).rejects.toThrow(
+			"git checkout main failed",
+		);
 	});
 });
