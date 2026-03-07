@@ -197,8 +197,18 @@
 			"greenhouse-fd96",
 			"greenhouse-54a0"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-07T15:41:53.994Z",
+		"completedAt": "2026-03-07T15:56:47.109Z"
+	},
+	{
+		"id": "group-ddd7f518",
+		"name": "e2e-pipeline-validation",
+		"memberIssueIds": [
+			"greenhouse-b8d5"
+		],
+		"status": "active",
+		"createdAt": "2026-03-07T16:08:41.803Z",
 		"completedAt": null
 	}
 ]
