@@ -16,13 +16,15 @@ export function registerStopCommand(program: Command): void {
 
 			if (pid === null) {
 				process.stderr.write("No PID file found. Is the daemon running?\n");
-				process.exit(1);
+				process.exitCode = 1;
+				return;
 			}
 
 			if (!isProcessAlive(pid)) {
 				process.stderr.write(`PID ${pid} is not alive. Removing stale PID file.\n`);
 				await removePid(pidPath);
-				process.exit(1);
+				process.exitCode = 1;
+				return;
 			}
 
 			if (opts.force) {
@@ -47,6 +49,6 @@ export function registerStopCommand(program: Command): void {
 			}
 
 			process.stderr.write("Daemon did not stop within 10s. Use --force to kill.\n");
-			process.exit(1);
+			process.exitCode = 1;
 		});
 }

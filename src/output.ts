@@ -122,21 +122,21 @@ export function outputJson(data: unknown): void {
 
 export function printSuccess(msg: string): void {
 	if (_json || _quiet) return;
-	console.log(`${brand("✓")} ${brand(msg)}`);
+	console.log(`${brand.bold("✓")} ${brand(msg)}`);
 }
 
 export function printError(msg: string): void {
-	console.error(`${chalk.red("✗")} ${msg}`);
+	console.error(`${chalk.red.bold("✗")} ${chalk.red(msg)}`);
 }
 
 export function printWarning(msg: string): void {
 	if (_json || _quiet) return;
-	console.log(`${chalk.yellow("!")} ${msg}`);
+	console.log(`${chalk.yellow.bold("!")} ${chalk.yellow(msg)}`);
 }
 
 export function printInfo(msg: string): void {
 	if (_json || _quiet) return;
-	console.log(`${muted("·")} ${msg}`);
+	console.log(chalk.dim(`  ${msg}`));
 }
 
 export function printDebug(msg: string): void {
@@ -146,7 +146,7 @@ export function printDebug(msg: string): void {
 
 const STATUS_ICONS: Record<string, string> = {
 	pending: muted("○"),
-	ingested: accent("◎"),
+	ingested: chalk.green("-"),
 	running: chalk.cyan("◉"),
 	shipping: chalk.blue("⬆"),
 	shipped: brand("✓"),

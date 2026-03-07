@@ -5,7 +5,9 @@
  */
 
 import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import chalk from "chalk";
 import type { Command } from "commander";
 
 export type CheckStatus = "pass" | "fail" | "warn";
@@ -122,19 +124,67 @@ export async function runDoctorChecks(spawner: Spawner = defaultSpawner): Promis
 }
 
 const STATUS_ICON: Record<CheckStatus, string> = {
-	pass: "✓",
-	fail: "✗",
-	warn: "⚠",
+	pass: chalk.green("✓"),
+	fail: chalk.red("✗"),
+	warn: chalk.yellow("!"),
 };
+
+function defaultConfigYaml(): string {
+	return `version: "1"
+
+repos: []
+
+poll_interval_minutes: 10
+daily_cap: 5
+
+dispatch:
+  capability: coordinator
+  max_concurrent: 2
+  monitor_interval_seconds: 30
+  run_timeout_minutes: 60
+
+shipping:
+  auto_push: true
+`;
+}
 
 export function registerDoctorCommand(program: Command): void {
 	program
 		.command("doctor")
 		.description("Run health checks (gh auth, ov, sd, git, config, state)")
 		.option("--json", "Output results as JSON")
-		.action(async (opts: { json?: boolean }) => {
+		.option("--fix", "Auto-repair fixable issues")
+		.action(async (opts: { json?: boolean; fix?: boolean }) => {
 			const useJson = opts.json ?? (program.opts() as { json?: boolean }).json ?? false;
 			const checks = await runDoctorChecks();
+
+			if (opts.fix) {
+				for (const check of checks) {
+					if (check.status === "pass") continue;
+					switch (check.name) {
+						case "config": {
+							const configDir = join(process.cwd(), ".greenhouse");
+							const configPath = join(configDir, "config.yaml");
+							await mkdir(configDir, { recursive: true });
+							if (!existsSync(configPath)) {
+								await Bun.write(configPath, defaultConfigYaml());
+								process.stdout.write(`  Fixed: created ${configPath}\n`);
+							}
+							break;
+						}
+						case "state": {
+							const stateDir = join(process.cwd(), ".greenhouse");
+							const statePath = join(stateDir, "state.jsonl");
+							await mkdir(stateDir, { recursive: true });
+							if (!existsSync(statePath)) {
+								await Bun.write(statePath, "");
+								process.stdout.write(`  Fixed: created ${statePath}\n`);
+							}
+							break;
+						}
+					}
+				}
+			}
 
 			if (useJson) {
 				const passing = checks.filter((c) => c.status === "pass").length;

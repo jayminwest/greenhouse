@@ -18,7 +18,7 @@ import {
 	printWarning,
 	setJsonMode,
 } from "../output.ts";
-import { appendRun, readAllRuns, updateRun } from "../state.ts";
+import { appendRun, readAllRuns, updateRun, writeAllRuns } from "../state.ts";
 import type { RunState } from "../types.ts";
 
 /**
@@ -120,6 +120,24 @@ export async function retryRun(
 	};
 	await appendRun(dispatchedRun, projectRoot);
 	return dispatchedRun;
+}
+
+/**
+ * Compact state.jsonl by removing terminal runs. Exported for testing.
+ * Returns counts of removed and remaining entries.
+ */
+export async function cleanRuns(
+	projectRoot: string,
+	opts: { keepShipped?: boolean } = {},
+): Promise<{ removed: number; remaining: number }> {
+	const runs = await readAllRuns(projectRoot);
+	const keep = runs.filter((r) => {
+		if (r.status === "failed" && r.retryable !== true) return false;
+		if (r.status === "shipped" && !opts.keepShipped) return false;
+		return true;
+	});
+	await writeAllRuns(keep, projectRoot);
+	return { removed: runs.length - keep.length, remaining: keep.length };
 }
 
 export function registerRunsCommand(program: Command): void {
@@ -252,6 +270,22 @@ export function registerRunsCommand(program: Command): void {
 				if (json) outputJson({ error: msg });
 				else printError(msg);
 				process.exitCode = 1;
+			}
+		});
+
+	run
+		.command("clean")
+		.description("Compact state.jsonl by removing shipped and failed runs")
+		.option("--keep-shipped", "Preserve shipped runs; only remove non-retryable failed runs")
+		.action(async (opts: { keepShipped?: boolean }) => {
+			const json = !!program.opts().json;
+			if (json) setJsonMode(true);
+
+			const result = await cleanRuns(process.cwd(), { keepShipped: opts.keepShipped });
+			if (json) {
+				outputJson(result);
+			} else {
+				printSuccess(`Removed ${result.removed} run(s), ${result.remaining} remaining`);
 			}
 		});
 }

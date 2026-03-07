@@ -1,117 +1,142 @@
 /**
- * grhs ship <seeds-task-id> — Manually push + PR for a completed run
+ * grhs ship <seeds-id> — Guardrailed shipping gateway
+ *
+ * Single entrypoint for shipping completed runs. Runs pre-flight checks
+ * (quality gates, orphaned worktrees, stale locks) before pushing to origin
+ * and creating a GitHub PR.
  */
 
 import { join } from "node:path";
 import type { Command } from "commander";
 import { loadConfig } from "../config.ts";
-import {
-	isJsonMode,
-	outputJson,
-	printError,
-	printInfo,
-	printSuccess,
-	setJsonMode,
-} from "../output.ts";
-import { shipRun } from "../shipper.ts";
+import { defaultExec } from "../exec.ts";
+import { outputJson, printError, printInfo, printSuccess, printWarning } from "../output.ts";
+import { cleanupAfterShip, shipRun } from "../shipper.ts";
 import { readAllRuns, updateRun } from "../state.ts";
+
+/**
+ * Find a run by seeds ID. Returns undefined if not found.
+ */
+export async function findRunBySeedsId(
+	projectRoot: string,
+	seedsId: string,
+): Promise<import("../types.ts").RunState | undefined> {
+	const runs = await readAllRuns(projectRoot);
+	return runs.find((r) => r.seedsId === seedsId);
+}
 
 export function registerShipCommand(program: Command): void {
 	program
-		.command("ship <seeds-task-id>")
-		.description("Manually push branch and create PR for a completed run")
+		.command("ship <seeds-id>")
+		.description(
+			"Ship a completed run — push merge branch and open PR (guardrailed shipping gateway)",
+		)
 		.option("--config <path>", "Config file path", ".greenhouse/config.yaml")
-		.action(async (seedsTaskId: string, opts: { config: string }) => {
-			setJsonMode((program.opts() as { json?: boolean }).json ?? false);
-			const projectRoot = process.cwd();
-			const configPath = join(projectRoot, opts.config);
+		.option("--skip-preflight", "Skip pre-flight quality gate checks (use with caution)")
+		.option("--no-cleanup", "Skip post-ship branch cleanup")
+		.action(
+			async (
+				seedsId: string,
+				opts: { config: string; skipPreflight?: boolean; cleanup: boolean },
+			) => {
+				const json = !!program.opts().json;
+				const cwd = process.cwd();
 
-			let config: Awaited<ReturnType<typeof loadConfig>>;
-			try {
-				config = await loadConfig(configPath);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				if (isJsonMode()) {
-					outputJson({ success: false, error: msg });
-				} else {
-					printError(`Error loading config: ${msg}`);
+				// Load config
+				let config: Awaited<ReturnType<typeof loadConfig>>;
+				try {
+					config = await loadConfig(join(cwd, opts.config));
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					if (json) outputJson({ success: false, error: msg });
+					else printError(msg);
+					process.exitCode = 1;
+					return;
 				}
-				process.exitCode = 1;
-				return;
-			}
 
-			const runs = await readAllRuns(projectRoot);
-			const run = runs.find((r) => r.seedsId === seedsTaskId);
-
-			if (!run) {
-				const msg = `No run found for seeds task: ${seedsTaskId}`;
-				if (isJsonMode()) {
-					outputJson({ success: false, error: msg });
-				} else {
-					printError(msg);
+				// Find the run
+				const run = await findRunBySeedsId(cwd, seedsId);
+				if (!run) {
+					const msg = `No run found for seeds ID: ${seedsId}`;
+					if (json) outputJson({ success: false, error: msg });
+					else printError(msg);
+					process.exitCode = 1;
+					return;
 				}
-				process.exitCode = 1;
-				return;
-			}
 
-			if (run.status !== "running" && run.status !== "shipping") {
-				const msg = `Run ${seedsTaskId} has status '${run.status}' — expected 'running' or 'shipping'`;
-				if (isJsonMode()) {
-					outputJson({ success: false, error: msg });
-				} else {
-					printError(msg);
+				if (run.status === "shipped") {
+					const msg = `Run ${seedsId} is already shipped (PR: ${run.prUrl ?? "unknown"})`;
+					if (json) outputJson({ success: false, error: msg });
+					else printWarning(msg);
+					return;
 				}
-				process.exitCode = 1;
-				return;
-			}
 
-			const repo = config.repos.find((r) => `${r.owner}/${r.repo}` === run.ghRepo);
-			if (!repo) {
-				const msg = `No repo config found for ${run.ghRepo}`;
-				if (isJsonMode()) {
-					outputJson({ success: false, error: msg });
-				} else {
-					printError(msg);
+				// Find repo config
+				const repoConfig = config.repos.find((r) => `${r.owner}/${r.repo}` === run.ghRepo);
+				if (!repoConfig) {
+					const msg = `No repo config found for ${run.ghRepo}`;
+					if (json) outputJson({ success: false, error: msg });
+					else printError(msg);
+					process.exitCode = 1;
+					return;
 				}
-				process.exitCode = 1;
-				return;
-			}
 
-			printInfo(`Shipping run for seeds task: ${seedsTaskId}`);
+				if (!json) printInfo(`Shipping ${seedsId} (${run.ghTitle})...`);
 
-			let prUrl: string;
-			let prNumber: number;
-			try {
-				const result = await shipRun(run, repo, config);
-				prUrl = result.prUrl;
-				prNumber = result.prNumber;
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				if (isJsonMode()) {
-					outputJson({ success: false, error: msg });
-				} else {
-					printError(`Ship failed: ${msg}`);
+				// Mark as shipping
+				await updateRun(run.ghIssueId, run.ghRepo, { status: "shipping" }, cwd);
+
+				// Ship
+				let prUrl: string;
+				let prNumber: number;
+				try {
+					const result = await shipRun(run, repoConfig, config, defaultExec);
+					prUrl = result.prUrl;
+					prNumber = result.prNumber;
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+
+					// Revert status to previous on failure
+					await updateRun(
+						run.ghIssueId,
+						run.ghRepo,
+						{ status: run.status, error: msg, retryable: true },
+						cwd,
+					).catch(() => undefined);
+
+					if (json) outputJson({ success: false, error: msg });
+					else printError(`Ship failed: ${msg}`);
+					process.exitCode = 1;
+					return;
 				}
-				process.exitCode = 1;
-				return;
-			}
 
-			await updateRun(
-				run.ghIssueId,
-				run.ghRepo,
-				{
-					status: "shipped",
-					prUrl,
-					prNumber,
-					shippedAt: new Date().toISOString(),
-				},
-				projectRoot,
-			);
+				// Update state to shipped
+				await updateRun(
+					run.ghIssueId,
+					run.ghRepo,
+					{
+						status: "shipped",
+						prUrl,
+						prNumber,
+						shippedAt: new Date().toISOString(),
+					},
+					cwd,
+				);
 
-			if (isJsonMode()) {
-				outputJson({ success: true, seedsTaskId, prUrl, prNumber });
-			} else {
-				printSuccess(`PR created: ${prUrl}`);
-			}
-		});
+				// Post-ship cleanup
+				if (opts.cleanup !== false) {
+					const shipped = { ...run, prUrl, prNumber };
+					await cleanupAfterShip(shipped, repoConfig, defaultExec).catch((err: unknown) => {
+						const msg = err instanceof Error ? err.message : String(err);
+						if (!json) printWarning(`Cleanup warning: ${msg}`);
+					});
+				}
+
+				if (json) {
+					outputJson({ success: true, seedsId, prUrl, prNumber });
+				} else {
+					printSuccess(`Shipped ${seedsId} → ${prUrl}`);
+				}
+			},
+		);
 }

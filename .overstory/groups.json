@@ -73,9 +73,9 @@
 		"memberIssueIds": [
 			"greenhouse-f615"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T02:07:01.024Z",
-		"completedAt": null
+		"completedAt": "2026-03-07T15:00:00.000Z"
 	},
 	{
 		"id": "group-42c7824b",
@@ -105,8 +105,110 @@
 		"memberIssueIds": [
 			"greenhouse-9136"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T18:34:37.718Z",
+		"completedAt": "2026-03-06T18:46:23.334Z"
+	},
+	{
+		"id": "group-9816ec83",
+		"name": "runs-clean",
+		"memberIssueIds": [
+			"greenhouse-bf03"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-06T18:51:25.467Z",
+		"completedAt": "2026-03-06T19:10:42.177Z"
+	},
+	{
+		"id": "group-26b7f34d",
+		"name": "post-ship-cleanup",
+		"memberIssueIds": [
+			"greenhouse-4040"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-06T19:14:27.180Z",
+		"completedAt": "2026-03-06T19:25:37.347Z"
+	},
+	{
+		"id": "group-91b436f7",
+		"name": "ready-issues-batch",
+		"memberIssueIds": [
+			"greenhouse-39c0",
+			"greenhouse-dbe9",
+			"greenhouse-47d3",
+			"greenhouse-1ac6",
+			"greenhouse-6bcf"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-06T19:41:49.613Z",
+		"completedAt": "2026-03-06T19:51:50.442Z"
+	},
+	{
+		"id": "group-e03fa8f8",
+		"name": "supervisor-phase1",
+		"memberIssueIds": [
+			"greenhouse-a426",
+			"greenhouse-aedd"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-06T20:26:48.637Z",
+		"completedAt": "2026-03-06T20:35:16.881Z"
+	},
+	{
+		"id": "group-5e5713f3",
+		"name": "supervisor-phase2",
+		"memberIssueIds": [
+			"greenhouse-7cb5"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-06T20:36:30.958Z",
+		"completedAt": "2026-03-06T20:46:25.038Z"
+	},
+	{
+		"id": "group-5b422b61",
+		"name": "supervisor-phase3",
+		"memberIssueIds": [
+			"greenhouse-4f82",
+			"greenhouse-5b04"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-06T20:48:10.979Z",
+		"completedAt": "2026-03-07T14:30:45.712Z"
+	},
+	{
+		"id": "group-cdcf559b",
+		"name": "v1-done-audit",
+		"memberIssueIds": [
+			"greenhouse-4964"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-07T14:33:56.116Z",
+		"completedAt": "2026-03-07T14:55:05.258Z"
+	},
+	{
+		"id": "group-b43cd7c0",
+		"name": "v1-polish-batch",
+		"memberIssueIds": [
+			"greenhouse-089b",
+			"greenhouse-04a7",
+			"greenhouse-1789",
+			"greenhouse-6dac",
+			"greenhouse-268d",
+			"greenhouse-fd96",
+			"greenhouse-54a0"
+		],
+		"status": "completed",
+		"createdAt": "2026-03-07T15:41:53.994Z",
+		"completedAt": "2026-03-07T15:56:47.109Z"
+	},
+	{
+		"id": "group-ddd7f518",
+		"name": "e2e-pipeline-validation",
+		"memberIssueIds": [
+			"greenhouse-b8d5"
+		],
+		"status": "active",
+		"createdAt": "2026-03-07T16:08:41.803Z",
 		"completedAt": null
 	}
 ]

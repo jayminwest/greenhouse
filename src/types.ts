@@ -35,6 +35,7 @@ export interface RunState {
 	agentName?: string;
 	branch?: string;
 	mergeBranch?: string;
+	supervisorSessionName?: string;
 
 	// Shipping
 	prUrl?: string;
@@ -44,6 +45,7 @@ export interface RunState {
 	discoveredAt: string;
 	ingestedAt?: string;
 	dispatchedAt?: string;
+	supervisorSpawnedAt?: string;
 	completedAt?: string;
 	shippedAt?: string;
 	updatedAt: string;
@@ -68,6 +70,7 @@ export interface DaemonConfig {
 		max_concurrent: number;
 		monitor_interval_seconds: number;
 		run_timeout_minutes: number;
+		supervisor_model?: string;
 	};
 	shipping: {
 		auto_push: boolean;
@@ -225,9 +228,17 @@ export interface DispatchContext {
 	ghLabels?: string[];
 }
 
-// === Shipping ===
+// === Supervisor ===
 
-export interface ShipResult {
-	prUrl: string;
-	prNumber: number;
+export interface SupervisorConfig {
+	seedsId: string;
+	mergeBranch: string;
+	repo: RepoConfig;
+	config: DaemonConfig;
+	specPath?: string;
+}
+
+export interface SpawnSupervisorResult {
+	sessionName: string;
+	pid: number;
 }

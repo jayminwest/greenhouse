@@ -1,21 +1,14 @@
+import { mkdir } from "node:fs/promises";
 import { BudgetTracker } from "./budget.ts";
 import { loadConfig } from "./config.ts";
 import { dispatchRun } from "./dispatcher.ts";
 import { defaultExec } from "./exec.ts";
 import { ingestIssue } from "./ingester.ts";
-import { checkRunStatus } from "./monitor.ts";
+import { pidFilePath, removePid, writePid } from "./pid.ts";
 import { pollIssues } from "./poller.ts";
-import { shipRun } from "./shipper.ts";
-import {
-	appendRun,
-	getActiveRuns,
-	getFailedRetryableRuns,
-	isIngested,
-	readAllRuns,
-	updateRun,
-} from "./state.ts";
-import { teardownCoordinator } from "./teardown.ts";
-import type { DaemonConfig, ExecFn, GhIssue, RepoConfig, RunState } from "./types.ts";
+import { appendRun, getActiveRuns, isIngested, readAllRuns, updateRun } from "./state.ts";
+import { isSupervisorAlive, killSupervisor, spawnSupervisor } from "./supervisor.ts";
+import type { DaemonConfig, ExecFn, GhIssue, RunState } from "./types.ts";
 
 function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: object): void {
 	const entry = { ts: new Date().toISOString(), level, msg, ...extra };
@@ -23,11 +16,10 @@ function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: ob
 }
 
 /**
- * Monitor all active runs and advance their state.
- * Returns updated runs.
+ * Monitor all active supervisor sessions and advance their state when they exit.
+ * When a supervisor session exits, reads the final state it wrote to state.jsonl.
  */
-async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<void> {
-	// Group active runs by repo
+async function monitorSupervisors(config: DaemonConfig, exec: ExecFn): Promise<void> {
 	for (const repo of config.repos) {
 		const projectRoot = repo.project_root;
 		const activeRuns = (await getActiveRuns(projectRoot)).filter(
@@ -35,164 +27,75 @@ async function monitorActiveRuns(config: DaemonConfig, exec: ExecFn): Promise<vo
 		);
 
 		for (const run of activeRuns) {
+			if (!run.supervisorSessionName) continue;
+
 			try {
-				if (run.status === "running") {
-					// Check for timeout
-					const dispatchedAt = run.dispatchedAt ? new Date(run.dispatchedAt).getTime() : 0;
+				const alive = await isSupervisorAlive(run.supervisorSessionName, exec);
+
+				if (alive) {
+					// Check for daemon-level timeout — hard limit, outer safety net
 					const timeoutMs = config.dispatch.run_timeout_minutes * 60 * 1000;
-					const runningMs = Date.now() - dispatchedAt;
-					if (runningMs > timeoutMs) {
-						log("warn", "Run timeout exceeded", {
-							event: "run.timeout",
-							seedsId: run.seedsId,
-							ghIssueId: run.ghIssueId,
-							duration_ms: runningMs,
-						});
-						await updateRun(
-							run.ghIssueId,
-							run.ghRepo,
-							{
-								status: "failed",
-								error: "run timeout exceeded",
-								retryable: true,
-							},
-							projectRoot,
-						);
-						continue;
+					const spawnedAt = run.supervisorSpawnedAt ?? run.dispatchedAt;
+					if (spawnedAt) {
+						const elapsedMs = Date.now() - new Date(spawnedAt).getTime();
+						if (elapsedMs >= timeoutMs) {
+							log("warn", "Supervisor timed out, killing session", {
+								event: "supervisor.timeout",
+								seedsId: run.seedsId,
+								sessionName: run.supervisorSessionName,
+								elapsed_minutes: Math.floor(elapsedMs / 60_000),
+								timeout_minutes: config.dispatch.run_timeout_minutes,
+							});
+							await killSupervisor(run.supervisorSessionName, exec);
+							await updateRun(
+								run.ghIssueId,
+								run.ghRepo,
+								{
+									status: "failed",
+									error: `Supervisor timed out after ${config.dispatch.run_timeout_minutes} minutes`,
+									retryable: true,
+								},
+								projectRoot,
+							);
+						}
 					}
+					continue;
+				}
 
-					// Check completion
-					const result = await checkRunStatus(run.seedsId, repo, exec);
-					log("debug", "Run status", {
+				// Supervisor exited — read the final state it wrote to state.jsonl
+				const allRuns = await readAllRuns(projectRoot);
+				const latest = allRuns.filter((r) => r.seedsId === run.seedsId).at(-1);
+
+				if (latest && (latest.status === "shipped" || latest.status === "failed")) {
+					log("info", "Supervisor session exited", {
+						event: "supervisor.exited",
 						seedsId: run.seedsId,
-						state: result.state,
-						failed: result.failed,
+						status: latest.status,
 					});
-
-					if (result.completed && result.failed) {
-						// Agent(s) exited without closing the seeds issue — mark as failed
-						const failedNow = Date.now();
-						log("warn", "Run failed — agents exited without completing", {
-							event: "run.failed",
-							seedsId: run.seedsId,
-							ghIssueId: run.ghIssueId,
-							duration_ms: dispatchedAt ? failedNow - dispatchedAt : undefined,
-							retryable: result.retryable,
-						});
-						await updateRun(
-							run.ghIssueId,
-							run.ghRepo,
-							{
-								status: "failed",
-								error: "Agents exited without closing the seeds issue",
-								retryable: result.retryable ?? true,
-							},
-							projectRoot,
-						);
-						if (run.agentName) {
-							try {
-								await teardownCoordinator(run.agentName, repo, exec);
-							} catch (err) {
-								log("warn", "Coordinator teardown failed (non-fatal)", {
-									seedsId: run.seedsId,
-									error: err instanceof Error ? err.message : String(err),
-								});
-							}
-						}
-					} else if (result.completed) {
-						// Seeds issue closed — success, proceed to shipping
-						if (run.agentName) {
-							try {
-								await teardownCoordinator(run.agentName, repo, exec);
-							} catch (err) {
-								log("warn", "Coordinator teardown failed (non-fatal)", {
-									seedsId: run.seedsId,
-									error: err instanceof Error ? err.message : String(err),
-								});
-							}
-						}
-						const completedNow = Date.now();
-						log("info", "Run completed", {
-							event: "run.completed",
-							seedsId: run.seedsId,
-							ghIssueId: run.ghIssueId,
-							duration_ms: dispatchedAt ? completedNow - dispatchedAt : undefined,
-						});
-						const updated = await updateRun(
-							run.ghIssueId,
-							run.ghRepo,
-							{
-								status: "shipping",
-								completedAt: new Date(completedNow).toISOString(),
-							},
-							projectRoot,
-						);
-						await advanceShipping(updated, repo, config, projectRoot, exec);
-					}
-				} else if (run.status === "shipping") {
-					// Retry shipping if it was interrupted
-					await advanceShipping(run, repo, config, projectRoot, exec);
+				} else {
+					// Supervisor exited without updating state — mark as failed
+					log("warn", "Supervisor exited without updating state", {
+						event: "supervisor.exited_no_state",
+						seedsId: run.seedsId,
+					});
+					await updateRun(
+						run.ghIssueId,
+						run.ghRepo,
+						{
+							status: "failed",
+							error: "Supervisor exited without updating state",
+							retryable: false,
+						},
+						projectRoot,
+					);
 				}
 			} catch (err) {
-				log("error", "Error monitoring run", {
+				log("error", "Error monitoring supervisor", {
 					seedsId: run.seedsId,
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}
 		}
-	}
-}
-
-async function advanceShipping(
-	run: RunState,
-	repo: RepoConfig,
-	config: DaemonConfig,
-	projectRoot: string,
-	exec: ExecFn,
-): Promise<void> {
-	try {
-		const { prUrl, prNumber } = await shipRun(run, repo, config, exec);
-		const shippedNow = Date.now();
-		const shippingMs = run.completedAt
-			? shippedNow - new Date(run.completedAt).getTime()
-			: undefined;
-		const totalMs = run.discoveredAt
-			? shippedNow - new Date(run.discoveredAt).getTime()
-			: undefined;
-		await updateRun(
-			run.ghIssueId,
-			run.ghRepo,
-			{
-				status: "shipped",
-				prUrl,
-				prNumber,
-				shippedAt: new Date(shippedNow).toISOString(),
-			},
-			projectRoot,
-		);
-		log("info", "Run shipped", {
-			event: "run.shipped",
-			seedsId: run.seedsId,
-			prUrl,
-			duration_ms: shippingMs,
-			total_ms: totalMs,
-		});
-	} catch (err) {
-		log("error", "Shipping failed", {
-			event: "run.shipping_failed",
-			seedsId: run.seedsId,
-			error: err instanceof Error ? err.message : String(err),
-		});
-		await updateRun(
-			run.ghIssueId,
-			run.ghRepo,
-			{
-				status: "failed",
-				error: err instanceof Error ? err.message : String(err),
-				retryable: true,
-			},
-			projectRoot,
-		);
 	}
 }
 
@@ -202,9 +105,10 @@ async function advanceShipping(
 export async function runPollCycle(
 	config: DaemonConfig,
 	exec: ExecFn = defaultExec,
+	budget?: BudgetTracker,
 ): Promise<void> {
-	// 1. Monitor active runs first
-	await monitorActiveRuns(config, exec);
+	// 1. Monitor active supervisor sessions
+	await monitorSupervisors(config, exec);
 
 	// 2. Count currently active runs across all repos
 	let activeCount = 0;
@@ -213,60 +117,12 @@ export async function runPollCycle(
 		activeCount += runs.filter((r) => r.ghRepo === `${repo.owner}/${repo.repo}`).length;
 	}
 
-	// 2.5. Retry failed retryable runs
-	for (const repo of config.repos) {
-		if (activeCount >= config.dispatch.max_concurrent) break;
-
-		const projectRoot = repo.project_root;
-		const repoStr = `${repo.owner}/${repo.repo}`;
-		const failedRuns = (await getFailedRetryableRuns(projectRoot)).filter(
-			(r) => r.ghRepo === repoStr,
-		);
-
-		for (const run of failedRuns) {
-			if (activeCount >= config.dispatch.max_concurrent) break;
-
-			try {
-				const { agentName, mergeBranch, mailId } = await dispatchRun(run.seedsId, repo, exec);
-				await updateRun(
-					run.ghIssueId,
-					run.ghRepo,
-					{
-						status: "running",
-						agentName,
-						mergeBranch,
-						dispatchedAt: new Date().toISOString(),
-						error: undefined,
-						retryable: undefined,
-					},
-					projectRoot,
-				);
-				log("info", "Retrying failed run", {
-					event: "run.retry_dispatched",
-					seedsId: run.seedsId,
-					ghIssueId: run.ghIssueId,
-					agentName,
-					mergeBranch,
-					mailId,
-				});
-				activeCount++;
-			} catch (err) {
-				log("error", "Retry dispatch failed", {
-					event: "run.retry_failed",
-					seedsId: run.seedsId,
-					ghIssueId: run.ghIssueId,
-					error: err instanceof Error ? err.message : String(err),
-				});
-			}
-		}
-	}
-
 	// 3. Dispatch new issues if under max_concurrent
-	const budget = new BudgetTracker(config.daily_cap);
+	const tracker = budget ?? new BudgetTracker(config.daily_cap);
 
 	for (const repo of config.repos) {
 		if (activeCount >= config.dispatch.max_concurrent) break;
-		if (!budget.hasCapacity()) {
+		if (!tracker.hasCapacity()) {
 			log("info", "Daily budget exhausted, skipping dispatch");
 			break;
 		}
@@ -289,7 +145,7 @@ export async function runPollCycle(
 
 		for (const issue of issues) {
 			if (activeCount >= config.dispatch.max_concurrent) break;
-			if (!budget.hasCapacity()) break;
+			if (!tracker.hasCapacity()) break;
 
 			// Skip already-ingested issues
 			const alreadyIngested = await isIngested(projectRoot, repoStr, issue.number);
@@ -338,11 +194,17 @@ export async function runPollCycle(
 						ghLabels: issue.labels.map((l) => l.name),
 					},
 				});
+
+				// Spawn supervisor to take ownership of the run through completion
+				const { sessionName } = await spawnSupervisor({ seedsId, mergeBranch, repo, config }, exec);
+
 				const runningRun: RunState = {
 					...ingestedRun,
 					status: "running",
 					agentName,
 					mergeBranch,
+					supervisorSessionName: sessionName,
+					supervisorSpawnedAt: now,
 					dispatchedAt: now,
 					updatedAt: now,
 				};
@@ -353,11 +215,12 @@ export async function runPollCycle(
 					agentName,
 					mergeBranch,
 					mailId,
+					supervisorSession: sessionName,
 					duration_ms:
 						nowMs - new Date(ingestedRun.ingestedAt ?? ingestedRun.discoveredAt).getTime(),
 				});
 
-				budget.consume();
+				tracker.consume();
 				activeCount++;
 			} catch (err) {
 				log("error", "Dispatch failed", {
@@ -402,6 +265,11 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 		daily_cap: config.daily_cap,
 	});
 
+	// Write PID file so `grhs status` can detect the daemon in foreground mode.
+	const pidPath = pidFilePath();
+	await mkdir(".greenhouse", { recursive: true });
+	await writePid(pidPath, process.pid);
+
 	let running = true;
 	let currentConfig = config;
 
@@ -427,29 +295,35 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 	process.on("SIGTERM", shutdown);
 	process.on("SIGHUP", reloadConfig);
 
-	while (running) {
-		try {
-			await runPollCycle(currentConfig);
-		} catch (err) {
-			log("error", "Poll cycle error", {
-				error: err instanceof Error ? err.message : String(err),
+	const budget = new BudgetTracker(currentConfig.daily_cap);
+
+	try {
+		while (running) {
+			try {
+				await runPollCycle(currentConfig, defaultExec, budget);
+			} catch (err) {
+				log("error", "Poll cycle error", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+
+			if (!running) break;
+
+			const sleepMs = currentConfig.poll_interval_minutes * 60 * 1000;
+			log("info", "Sleeping until next poll", {
+				next_poll_in_minutes: currentConfig.poll_interval_minutes,
 			});
+
+			// Sleep in small intervals so we can respond to signals promptly
+			const intervalMs = 5000;
+			let slept = 0;
+			while (slept < sleepMs && running) {
+				await new Promise((r) => setTimeout(r, Math.min(intervalMs, sleepMs - slept)));
+				slept += intervalMs;
+			}
 		}
-
-		if (!running) break;
-
-		const sleepMs = currentConfig.poll_interval_minutes * 60 * 1000;
-		log("info", "Sleeping until next poll", {
-			next_poll_in_minutes: config.poll_interval_minutes,
-		});
-
-		// Sleep in small intervals so we can respond to signals promptly
-		const intervalMs = 5000;
-		let slept = 0;
-		while (slept < sleepMs && running) {
-			await new Promise((r) => setTimeout(r, Math.min(intervalMs, sleepMs - slept)));
-			slept += intervalMs;
-		}
+	} finally {
+		await removePid(pidPath);
 	}
 
 	log("info", "Greenhouse daemon stopped");
