@@ -252,10 +252,10 @@ export async function shipRun(
 	}
 
 	// --- Create PR ---
-	const prBody = config.shipping.pr_template.replace(
-		"<!-- Summarize changes here -->",
-		`Closes #${ghIssueId}\n\nSeeds task: ${seedsId}`,
-	);
+	const prBody = config.shipping.pr_template
+		.replace(/\{github_issue_number\}/g, String(ghIssueId))
+		.replace(/\{seeds_task_id\}/g, seedsId)
+		.replace(/\{agent_summary\}/g, `Closes #${ghIssueId}`);
 
 	const prCreateResult = await exec(
 		[
@@ -336,7 +336,10 @@ export async function cleanupAfterShip(
 	const { mergeBranch } = run;
 
 	// Return to main
-	await exec(["git", "checkout", "main"], { cwd: projectRoot });
+	const checkoutResult = await exec(["git", "checkout", "main"], { cwd: projectRoot });
+	if (checkoutResult.exitCode !== 0) {
+		throw new Error(`git checkout main failed (dirty worktree?): ${checkoutResult.stderr.trim()}`);
+	}
 
 	if (mergeBranch) {
 		// Delete local merge branch (ignore errors — branch may already be gone)
