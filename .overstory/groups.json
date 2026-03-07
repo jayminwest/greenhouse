@@ -73,9 +73,9 @@
 		"memberIssueIds": [
 			"greenhouse-f615"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-06T02:07:01.024Z",
-		"completedAt": null
+		"completedAt": "2026-03-07T15:00:00.000Z"
 	},
 	{
 		"id": "group-42c7824b",
@@ -181,8 +181,24 @@
 		"memberIssueIds": [
 			"greenhouse-4964"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-07T14:33:56.116Z",
+		"completedAt": "2026-03-07T14:55:05.258Z"
+	},
+	{
+		"id": "group-b43cd7c0",
+		"name": "v1-polish-batch",
+		"memberIssueIds": [
+			"greenhouse-089b",
+			"greenhouse-04a7",
+			"greenhouse-1789",
+			"greenhouse-6dac",
+			"greenhouse-268d",
+			"greenhouse-fd96",
+			"greenhouse-54a0"
+		],
+		"status": "active",
+		"createdAt": "2026-03-07T15:41:53.994Z",
 		"completedAt": null
 	}
 ]
