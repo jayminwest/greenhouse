@@ -94,7 +94,7 @@ describe("buildSupervisorCommand", () => {
 	it("includes model and bypassPermissions", () => {
 		const cfg = makeConfig();
 		const cmd = buildSupervisorCommand(cfg);
-		expect(cmd).toContain("claude --model claude-sonnet-4-6");
+		expect(cmd).toContain("claude --model claude-opus-4-6");
 		expect(cmd).toContain("--permission-mode bypassPermissions");
 	});
 

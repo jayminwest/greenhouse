@@ -14,8 +14,8 @@ import { defaultExec } from "./exec.ts";
 import type { ExecFn, SpawnSupervisorResult, SupervisorConfig } from "./types.ts";
 import { GREENHOUSE_DIR } from "./types.ts";
 
-/** Default Claude model for the supervisor. Sonnet for cost efficiency. */
-const SUPERVISOR_MODEL = "claude-sonnet-4-6";
+/** Default Claude model for the supervisor. Opus for reliable multi-step execution. */
+const SUPERVISOR_MODEL = "claude-opus-4-6";
 
 /** Grace period between SIGTERM and SIGKILL when killing the supervisor. */
 const KILL_GRACE_PERIOD_MS = 2000;
