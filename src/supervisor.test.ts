@@ -7,6 +7,7 @@ import {
 	sendToSupervisor,
 	spawnSupervisor,
 	supervisorSessionName,
+	supervisorSpecPath,
 } from "./supervisor.ts";
 import type { DaemonConfig, ExecResult, RepoConfig, SupervisorConfig } from "./types.ts";
 
@@ -77,6 +78,18 @@ describe("supervisorSessionName", () => {
 	});
 });
 
+describe("supervisorSpecPath", () => {
+	it("returns path under .greenhouse/", () => {
+		const p = supervisorSpecPath("greenhouse-abc1", "/tmp/my-project");
+		expect(p).toBe("/tmp/my-project/.greenhouse/greenhouse-abc1-spec.md");
+	});
+
+	it("uses the seeds ID in the filename", () => {
+		const p = supervisorSpecPath("greenhouse-xyz9", "/tmp/repo");
+		expect(p).toContain("greenhouse-xyz9-spec.md");
+	});
+});
+
 describe("buildSupervisorCommand", () => {
 	it("includes model and bypassPermissions", () => {
 		const cfg = makeConfig();
@@ -112,19 +125,39 @@ describe("buildSupervisorBeacon", () => {
 	it("contains task seeds ID", () => {
 		const cfg = makeConfig();
 		const beacon = buildSupervisorBeacon(cfg);
-		expect(beacon).toContain("greenhouse-abc1");
+		expect(beacon).toContain("task:greenhouse-abc1");
 	});
 
 	it("contains merge branch", () => {
 		const cfg = makeConfig();
 		const beacon = buildSupervisorBeacon(cfg);
-		expect(beacon).toContain("greenhouse/greenhouse-abc1");
+		expect(beacon).toContain("branch:greenhouse/greenhouse-abc1");
 	});
 
 	it("contains repo owner/repo", () => {
 		const cfg = makeConfig();
 		const beacon = buildSupervisorBeacon(cfg);
-		expect(beacon).toContain("jayminwest/mulch");
+		expect(beacon).toContain("repo:jayminwest/mulch");
+	});
+
+	it("contains project root", () => {
+		const cfg = makeConfig();
+		const beacon = buildSupervisorBeacon(cfg);
+		expect(beacon).toContain("project:/tmp/test-project");
+	});
+
+	it("contains spec file path", () => {
+		const cfg = makeConfig();
+		const beacon = buildSupervisorBeacon(cfg);
+		expect(beacon).toContain("spec:");
+		expect(beacon).toContain("greenhouse-abc1-spec.md");
+	});
+
+	it("contains run timeout in minutes", () => {
+		const cfg = makeConfig();
+		const beacon = buildSupervisorBeacon(cfg);
+		expect(beacon).toContain("timeout:");
+		expect(beacon).toContain("min");
 	});
 
 	it("contains timestamp in ISO format", () => {
@@ -138,6 +171,22 @@ describe("buildSupervisorBeacon", () => {
 		const cfg = makeConfig();
 		const beacon = buildSupervisorBeacon(cfg);
 		expect(beacon).not.toContain("\n");
+	});
+
+	it("uses run_timeout_minutes from config", () => {
+		const cfgCustomTimeout = makeConfig({
+			config: {
+				...mockConfig,
+				dispatch: {
+					capability: "lead",
+					max_concurrent: 2,
+					monitor_interval_seconds: 30,
+					run_timeout_minutes: 120,
+				},
+			},
+		});
+		const beacon = buildSupervisorBeacon(cfgCustomTimeout);
+		expect(beacon).toContain("timeout:120min");
 	});
 });
 

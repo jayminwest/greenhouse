@@ -9,8 +9,10 @@
  * Session naming convention: `greenhouse-supervisor-<seedsId>`.
  */
 
+import { join } from "node:path";
 import { defaultExec } from "./exec.ts";
 import type { ExecFn, SpawnSupervisorResult, SupervisorConfig } from "./types.ts";
+import { GREENHOUSE_DIR } from "./types.ts";
 
 /** Default Claude model for the supervisor. Sonnet for cost efficiency. */
 const SUPERVISOR_MODEL = "claude-sonnet-4-6";
@@ -26,6 +28,22 @@ const KILL_GRACE_PERIOD_MS = 2000;
  */
 export function supervisorSessionName(seedsId: string): string {
 	return `greenhouse-supervisor-${seedsId}`;
+}
+
+/**
+ * Return the canonical path to the dispatch spec file for a run.
+ *
+ * The spec file is written by the dispatcher at
+ * `<projectRoot>/.greenhouse/<seedsId>-spec.md` and contains the full run
+ * context (GitHub issue number, owner, repo, labels, issue body). The
+ * supervisor reads this file to obtain values not passed in the beacon.
+ *
+ * @param seedsId - Seeds task ID
+ * @param projectRoot - Absolute path to the repo root
+ * @returns Absolute path to the spec file
+ */
+export function supervisorSpecPath(seedsId: string, projectRoot: string): string {
+	return join(projectRoot, GREENHOUSE_DIR, `${seedsId}-spec.md`);
 }
 
 /**
@@ -54,21 +72,37 @@ export function buildSupervisorCommand(cfg: SupervisorConfig): string {
 /**
  * Build the initial beacon message sent to the supervisor via tmux send-keys.
  *
- * This activates the supervisor after TUI readiness is detected. The full
- * run context is already available via --append-system-prompt-file; the beacon
- * provides a structured startup signal with key identifiers.
+ * This activates the supervisor after TUI readiness is detected. The beacon
+ * carries the complete run context so the supervisor can operate without
+ * unresolved template variables — all key/value pairs are pre-substituted
+ * before the message is sent.
+ *
+ * Fields included:
+ * - task        — seeds task ID
+ * - branch      — greenhouse merge branch
+ * - repo        — "owner/repo" string
+ * - project     — absolute path to the repo root (= supervisor cwd)
+ * - spec        — path to the dispatch spec file (contains GitHub issue number)
+ * - timeout     — run timeout in minutes
  *
  * @param cfg - Supervisor configuration
  * @returns Single-line beacon string (newlines not allowed — tmux send-keys)
  */
 export function buildSupervisorBeacon(cfg: SupervisorConfig): string {
 	const timestamp = new Date().toISOString();
+	const timeoutMin = cfg.config.dispatch.run_timeout_minutes;
+	const specPath = supervisorSpecPath(cfg.seedsId, cfg.repo.project_root);
 	const parts = [
-		`[GREENHOUSE SUPERVISOR] ${timestamp} task:${cfg.seedsId}`,
-		`Branch: ${cfg.mergeBranch} | Repo: ${cfg.repo.owner}/${cfg.repo.repo}`,
-		`Startup: check state with sd show ${cfg.seedsId}, monitor overstory run, ship PR when agents complete, then clean up`,
+		`[GREENHOUSE SUPERVISOR] ${timestamp}`,
+		`task:${cfg.seedsId}`,
+		`branch:${cfg.mergeBranch}`,
+		`repo:${cfg.repo.owner}/${cfg.repo.repo}`,
+		`project:${cfg.repo.project_root}`,
+		`spec:${specPath}`,
+		`timeout:${timeoutMin}min`,
+		`Startup: read spec file for full context, sd show ${cfg.seedsId} to check state, monitor overstory run, ship PR when agents complete, then clean up`,
 	];
-	return parts.join(" — ");
+	return parts.join(" | ");
 }
 
 /**
