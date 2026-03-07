@@ -5,12 +5,13 @@
  */
 
 import type { Command } from "commander";
+import { getDailyBudget } from "../budget.ts";
 import { loadConfig } from "../config.ts";
 import { dispatchRun } from "../dispatcher.ts";
 import { defaultExec } from "../exec.ts";
 import { ingestIssue } from "../ingester.ts";
 import { appendRun, updateRun } from "../state.ts";
-import type { GhIssue, RepoConfig } from "../types.ts";
+import type { DaemonConfig, GhIssue, RepoConfig } from "../types.ts";
 
 /**
  * Parse a GitHub issue URL into owner, repo, and issue number.
@@ -47,9 +48,10 @@ export function registerIngestCommand(program: Command): void {
 
 			// Load config to find project_root; fall back to cwd if repo not configured
 			let repoConfig: RepoConfig;
+			let daemonConfig: DaemonConfig | null = null;
 			try {
-				const config = await loadConfig(opts.config);
-				const found = config.repos.find((r) => r.owner === owner && r.repo === repo);
+				daemonConfig = await loadConfig(opts.config);
+				const found = daemonConfig.repos.find((r) => r.owner === owner && r.repo === repo);
 				repoConfig = found ?? { owner, repo, labels: [], project_root: process.cwd() };
 			} catch {
 				repoConfig = { owner, repo, labels: [], project_root: process.cwd() };
@@ -102,7 +104,14 @@ export function registerIngestCommand(program: Command): void {
 				repoConfig.project_root,
 			);
 
-			// Dispatch agent
+			// Dispatch agent (warn if budget exhausted, but proceed — manual ingest bypasses limits)
+			const dailyCap = daemonConfig?.daily_cap ?? 5;
+			const budget = await getDailyBudget(dailyCap, repoConfig.project_root);
+			if (budget.remaining <= 0) {
+				process.stderr.write(
+					`Warning: daily budget exhausted (${budget.dispatched}/${budget.cap} dispatched today). Proceeding anyway (manual ingest).\n`,
+				);
+			}
 			process.stdout.write(`Dispatching agent for ${seedsId}...\n`);
 			const dispatchResult = await dispatchRun(seedsId, repoConfig);
 

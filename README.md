@@ -64,14 +64,14 @@ grhs start
 
 ## How It Works
 
-Each poll cycle runs 6 stages in sequence:
+Each daemon cycle runs these stages:
 
-1. **Poll** — `gh issue list` fetches open issues with the configured labels
-2. **Ingest** — `sd create` converts each new issue to a seeds task
-3. **Dispatch** — `ov sling` launches an overstory lead agent for the task
-4. **Monitor** — polls `ov status` until agents report complete or stalled
-5. **Ship** — pushes the agent branch and creates a PR via `gh pr create`
-6. **Link** — comments on the original GitHub issue with the PR URL
+1. **Monitor** — checks active supervisor sessions for timeout or unexpected exit
+2. **Poll** — `gh issue list` fetches open issues with the configured labels
+3. **Ingest** — `sd create` converts each new issue to a seeds task
+4. **Dispatch** — `ov coordinator send` sends the task to the overstory coordinator, then `spawnSupervisor()` launches a dedicated supervisor tmux session to own the run through completion
+
+The **supervisor** handles the rest: it monitors the coordinator, detects completion (seeds issue closure), pushes the merge branch, creates a PR via `gh pr create`, and cleans up.
 
 Greenhouse never pushes to the canonical branch. Every run produces a PR for human review.
 
@@ -93,13 +93,15 @@ poll_interval_minutes: 10
 daily_cap: 5
 
 dispatch:
-  capability: lead
+  capability: coordinator
   max_concurrent: 2
   monitor_interval_seconds: 30
-  run_timeout_minutes: 60
+  run_timeout_minutes: 90
+  supervisor_model: claude-sonnet-4-6  # optional
 
 shipping:
   auto_push: true
+  auto_merge: false  # optional: auto-merge PR after creation
 ```
 
 Only `repos` is required. All other fields have sensible defaults. See SPEC.md for the full configuration reference.
@@ -123,11 +125,12 @@ Every command supports `--json` for structured output.
 
 | Command | Description |
 |---------|-------------|
-| `grhs runs` | List all tracked runs |
-| `grhs runs --status <status>` | Filter by status (pending/running/shipped/failed) |
-| `grhs run show <gh-issue-id>` | Show detailed run state |
-| `grhs run retry <gh-issue-id>` | Retry a failed run |
-| `grhs run cancel <gh-issue-id>` | Cancel a pending or running run |
+| `grhs runs list` | List all tracked runs |
+| `grhs runs list --status <status>` | Filter by status (pending/running/shipped/failed) |
+| `grhs runs show <gh-issue-id>` | Show detailed run state |
+| `grhs runs retry <gh-issue-id>` | Retry a failed run |
+| `grhs runs cancel <gh-issue-id>` | Cancel a pending or running run |
+| `grhs runs clean` | Remove completed/failed runs from state |
 
 ### Manual Operations
 
@@ -135,7 +138,6 @@ Every command supports `--json` for structured output.
 |---------|-------------|
 | `grhs poll` | Run one poll cycle (without starting daemon) |
 | `grhs ingest <gh-issue-url>` | Manually ingest a single issue (bypasses label filter and daily cap) |
-| `grhs ship <seeds-task-id>` | Manually push and create PR for a completed run |
 
 ### Utilities
 
@@ -145,7 +147,8 @@ Every command supports `--json` for structured output.
 | `grhs config show` | Print resolved configuration |
 | `grhs doctor` | Health checks (gh auth, ov, sd, git, config, state) |
 | `grhs logs` | Show daemon logs |
-| `grhs logs --follow` | Tail mode |
+| `grhs logs --follow` | Tail mode — stream new entries as they appear |
+| `grhs logs --since <duration>` | Filter by time (e.g. `1h`, `30m`, `90s`) |
 | `grhs budget` | Show daily budget status |
 
 ## Design Principles
