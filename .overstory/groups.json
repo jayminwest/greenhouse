@@ -220,8 +220,18 @@
 			"greenhouse-c47f",
 			"greenhouse-f568"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-07T16:24:18.109Z",
+		"completedAt": "2026-03-07T16:33:40.568Z"
+	},
+	{
+		"id": "group-1239c1a7",
+		"name": "e2e-pipeline-validation-2",
+		"memberIssueIds": [
+			"greenhouse-db7b"
+		],
+		"status": "active",
+		"createdAt": "2026-03-07T16:42:26.425Z",
 		"completedAt": null
 	}
 ]
