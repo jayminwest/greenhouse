@@ -35,6 +35,8 @@ import {
 
 export const VERSION = "0.1.2";
 
+// V1 E2E test validated: 2026-03-07
+
 const program = new Command();
 
 program
