@@ -6,6 +6,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import chalk from "chalk";
 import type { Command } from "commander";
 
 export type CheckStatus = "pass" | "fail" | "warn";
@@ -122,9 +123,9 @@ export async function runDoctorChecks(spawner: Spawner = defaultSpawner): Promis
 }
 
 const STATUS_ICON: Record<CheckStatus, string> = {
-	pass: "✓",
-	fail: "✗",
-	warn: "⚠",
+	pass: chalk.green("-"),
+	fail: chalk.red("!"),
+	warn: chalk.yellow("!"),
 };
 
 export function registerDoctorCommand(program: Command): void {
