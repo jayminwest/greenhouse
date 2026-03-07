@@ -6,6 +6,7 @@
  * Binary names: greenhouse (full), grhs (short alias)
  */
 
+import chalk from "chalk";
 import { Command } from "commander";
 import { registerBudgetCommand } from "./commands/budget.ts";
 import { registerConfigCommand } from "./commands/config.ts";
@@ -19,6 +20,8 @@ import { registerStartCommand } from "./commands/start.ts";
 import { registerStatusCommand } from "./commands/status.ts";
 import { registerStopCommand } from "./commands/stop.ts";
 import {
+	brand,
+	muted,
 	printElapsed,
 	setJsonMode,
 	setQuietMode,
@@ -42,7 +45,58 @@ program
 	.option("--config <path>", "Config file path (default: .greenhouse/config.yaml)")
 	.option("--quiet", "Suppress non-essential output (only errors and JSON)")
 	.option("--verbose", "Enable debug-level output for troubleshooting")
-	.option("--timing", "Print elapsed time after command completes");
+	.option("--timing", "Print elapsed time after command completes")
+	.addHelpCommand(false)
+	.configureHelp({
+		formatHelp(cmd, helper): string {
+			const COL_WIDTH = 20;
+			const lines: string[] = [];
+
+			// Header: "greenhouse v0.1.2 — Autonomous development daemon"
+			lines.push(
+				`${brand.bold(cmd.name())} ${muted(`v${VERSION}`)} — Autonomous development daemon`,
+			);
+			lines.push("");
+
+			// Usage
+			lines.push(`Usage: ${chalk.dim("grhs")} <command> [options]`);
+			lines.push("");
+
+			// Commands
+			const visibleCmds = helper.visibleCommands(cmd);
+			if (visibleCmds.length > 0) {
+				lines.push("Commands:");
+				for (const sub of visibleCmds) {
+					const term = helper.subcommandTerm(sub);
+					const firstSpace = term.indexOf(" ");
+					const name = firstSpace >= 0 ? term.slice(0, firstSpace) : term;
+					const args = firstSpace >= 0 ? ` ${term.slice(firstSpace + 1)}` : "";
+					const coloredTerm = `${chalk.green(name)}${args ? chalk.dim(args) : ""}`;
+					const rawLen = term.length;
+					const padding = " ".repeat(Math.max(2, COL_WIDTH - rawLen));
+					lines.push(`  ${coloredTerm}${padding}${helper.subcommandDescription(sub)}`);
+				}
+				lines.push("");
+			}
+
+			// Options
+			const visibleOpts = helper.visibleOptions(cmd);
+			if (visibleOpts.length > 0) {
+				lines.push("Options:");
+				for (const opt of visibleOpts) {
+					const flags = helper.optionTerm(opt);
+					const padding = " ".repeat(Math.max(2, COL_WIDTH - flags.length));
+					lines.push(`  ${chalk.dim(flags)}${padding}${helper.optionDescription(opt)}`);
+				}
+				lines.push("");
+			}
+
+			// Footer
+			lines.push(`Run '${chalk.dim("grhs")} <command> --help' for command-specific help.`);
+
+			return `${lines.join("\n")}\n`;
+		},
+	});
 
 // --version --json
 const rawArgs = process.argv.slice(2);
