@@ -70,7 +70,8 @@ export function registerPollCommand(program: Command): void {
 				process.stderr.write(
 					`Error loading config: ${err instanceof Error ? err.message : String(err)}\n`,
 				);
-				process.exit(1);
+				process.exitCode = 1;
+				return;
 			}
 
 			const exec = defaultExec;
@@ -153,7 +154,8 @@ export function registerPollCommand(program: Command): void {
 				process.stderr.write(
 					`Poll cycle failed: ${err instanceof Error ? err.message : String(err)}\n`,
 				);
-				process.exit(1);
+				process.exitCode = 1;
+				return;
 			}
 		});
 }

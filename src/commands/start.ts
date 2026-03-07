@@ -24,7 +24,8 @@ export function registerStartCommand(program: Command): void {
 			if (existingPid !== null) {
 				if (isProcessAlive(existingPid)) {
 					process.stderr.write(`Daemon already running (PID ${existingPid})\n`);
-					process.exit(1);
+					process.exitCode = 1;
+					return;
 				} else {
 					await removePid(pidPath);
 				}
@@ -45,11 +46,12 @@ export function registerStartCommand(program: Command): void {
 				const childPid = child.pid;
 				if (childPid === undefined) {
 					process.stderr.write("Failed to spawn daemon process.\n");
-					process.exit(1);
+					process.exitCode = 1;
+					return;
 				}
 				await writePid(pidPath, childPid);
 				process.stdout.write(`Daemon started (PID ${childPid}), logging to ${logPath}\n`);
-				process.exit(0);
+				return;
 			} else {
 				// Foreground mode: run daemon; on clean exit remove PID if we wrote one
 				try {
