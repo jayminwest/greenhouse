@@ -1,4 +1,6 @@
+import { appendFileSync } from "node:fs";
 import { mkdir, unlink } from "node:fs/promises";
+import { join } from "node:path";
 import { BudgetTracker } from "./budget.ts";
 import { loadConfig } from "./config.ts";
 import { dispatchRun } from "./dispatcher.ts";
@@ -6,7 +8,7 @@ import { defaultExec } from "./exec.ts";
 import { ingestIssue } from "./ingester.ts";
 import { pidFilePath, removePid, writePid } from "./pid.ts";
 import { pollIssues } from "./poller.ts";
-import { cleanupAfterShip } from "./shipper.ts";
+import { cleanupAfterShip, shipRun } from "./shipper.ts";
 import { appendRun, getActiveRuns, isIngested, readAllRuns, updateRun } from "./state.ts";
 import {
 	isSupervisorAlive,
@@ -16,9 +18,30 @@ import {
 } from "./supervisor.ts";
 import type { DaemonConfig, ExecFn, GhIssue, RunState } from "./types.ts";
 
+/** Path to the daemon log file, set by initLogFile(). */
+let _logFilePath: string | null = null;
+
+/**
+ * Initialize the log file path and ensure the .greenhouse/ directory exists.
+ * Must be called before the first log() call in runDaemon().
+ */
+export async function initLogFile(projectRoot: string): Promise<void> {
+	const ghDir = join(projectRoot, ".greenhouse");
+	await mkdir(ghDir, { recursive: true });
+	_logFilePath = join(ghDir, "daemon.log");
+}
+
 function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: object): void {
 	const entry = { ts: new Date().toISOString(), level, msg, ...extra };
-	process.stderr.write(`${JSON.stringify(entry)}\n`);
+	const line = `${JSON.stringify(entry)}\n`;
+	process.stderr.write(line);
+	if (_logFilePath) {
+		try {
+			appendFileSync(_logFilePath, line);
+		} catch {
+			// ignore write errors (e.g. disk full) — logging must not crash the daemon
+		}
+	}
 }
 
 /**
@@ -70,6 +93,56 @@ async function performPostShipCleanup(
 			seedsId: run.seedsId,
 			error: err instanceof Error ? err.message : String(err),
 		});
+	}
+}
+
+/**
+ * Kill any greenhouse-supervisor-* tmux sessions that are NOT associated with
+ * a currently active run. Called once at daemon startup to clear stale sessions
+ * left from prior daemon instances.
+ */
+export async function cleanupStaleSupervisors(
+	config: DaemonConfig,
+	exec: ExecFn = defaultExec,
+): Promise<void> {
+	// List all tmux sessions
+	const listResult = await exec(["tmux", "list-sessions", "-F", "#{session_name}"]);
+	if (listResult.exitCode !== 0) return; // tmux not running or no sessions
+
+	const allSessions = listResult.stdout
+		.split("\n")
+		.map((s) => s.trim())
+		.filter((s) => s.startsWith("greenhouse-supervisor-"));
+
+	if (allSessions.length === 0) return;
+
+	// Collect active run session names across all repos
+	const activeSessionNames = new Set<string>();
+	for (const repo of config.repos) {
+		const activeRuns = await getActiveRuns(repo.project_root);
+		for (const run of activeRuns) {
+			if (run.supervisorSessionName) {
+				activeSessionNames.add(run.supervisorSessionName);
+			}
+		}
+	}
+
+	// Kill sessions not associated with any active run
+	for (const session of allSessions) {
+		if (activeSessionNames.has(session)) continue;
+		try {
+			await killSupervisor(session, exec);
+			log("info", "Killed stale supervisor session", {
+				event: "supervisor.stale_cleanup",
+				session,
+			});
+		} catch (err) {
+			log("warn", "Failed to kill stale supervisor session", {
+				event: "supervisor.stale_cleanup_failed",
+				session,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
 	}
 }
 
@@ -137,21 +210,103 @@ async function monitorSupervisors(config: DaemonConfig, exec: ExecFn): Promise<v
 						status: "failed",
 					});
 				} else {
-					// Supervisor exited without updating state — mark as failed
-					log("warn", "Supervisor exited without updating state", {
-						event: "supervisor.exited_no_state",
+					// Supervisor exited without writing a terminal state — check whether
+					// seeds is closed. If it is, the supervisor completed its work and
+					// the daemon should ship. Otherwise, mark as failed.
+					log("info", "Supervisor exited without terminal state, checking seeds status", {
+						event: "supervisor.exited_check_seeds",
 						seedsId: run.seedsId,
 					});
-					await updateRun(
-						run.ghIssueId,
-						run.ghRepo,
-						{
-							status: "failed",
-							error: "Supervisor exited without updating state",
-							retryable: false,
-						},
-						projectRoot,
-					);
+
+					let seedsClosed = false;
+					try {
+						const seedsResult = await exec(["sd", "show", run.seedsId, "--json"], {
+							cwd: projectRoot,
+						});
+						if (seedsResult.exitCode === 0) {
+							const parsed = JSON.parse(seedsResult.stdout) as {
+								issue?: { status?: string };
+							};
+							seedsClosed = parsed.issue?.status === "closed";
+						}
+					} catch {
+						// seeds check failed — fall through to mark failed
+					}
+
+					if (seedsClosed && run.mergeBranch) {
+						// Seeds closed: supervisor completed work, daemon ships
+						const repoConfig = config.repos.find((r) => `${r.owner}/${r.repo}` === run.ghRepo);
+						if (repoConfig) {
+							try {
+								log("info", "Seeds closed, daemon shipping run", {
+									event: "run.daemon_shipping",
+									seedsId: run.seedsId,
+									mergeBranch: run.mergeBranch,
+								});
+								const { prUrl, prNumber } = await shipRun(run, repoConfig, config, exec);
+								await updateRun(
+									run.ghIssueId,
+									run.ghRepo,
+									{
+										status: "shipped",
+										prUrl,
+										prNumber,
+										shippedAt: new Date().toISOString(),
+									},
+									projectRoot,
+								);
+								await cleanupAfterShip(run, repoConfig, exec).catch(() => undefined);
+							} catch (shipErr) {
+								log("error", "Daemon shipping failed", {
+									event: "run.daemon_ship_failed",
+									seedsId: run.seedsId,
+									error: shipErr instanceof Error ? shipErr.message : String(shipErr),
+								});
+								await updateRun(
+									run.ghIssueId,
+									run.ghRepo,
+									{
+										status: "failed",
+										error: `Daemon shipping failed: ${shipErr instanceof Error ? shipErr.message : String(shipErr)}`,
+										retryable: true,
+									},
+									projectRoot,
+								);
+							}
+						} else {
+							log("warn", "Seeds closed but repo config not found, marking failed", {
+								event: "supervisor.exited_no_repo",
+								seedsId: run.seedsId,
+							});
+							await updateRun(
+								run.ghIssueId,
+								run.ghRepo,
+								{
+									status: "failed",
+									error: "Supervisor exited with seeds closed but repo config not found",
+									retryable: false,
+								},
+								projectRoot,
+							);
+						}
+					} else {
+						// Seeds not closed: supervisor exited without completing
+						log("warn", "Supervisor exited without completing (seeds not closed)", {
+							event: "supervisor.exited_no_state",
+							seedsId: run.seedsId,
+							seeds_closed: seedsClosed,
+						});
+						await updateRun(
+							run.ghIssueId,
+							run.ghRepo,
+							{
+								status: "failed",
+								error: "Supervisor exited without completing (seeds not closed)",
+								retryable: true,
+							},
+							projectRoot,
+						);
+					}
 				}
 			} catch (err) {
 				log("error", "Error monitoring supervisor", {
@@ -353,6 +508,11 @@ export async function getRunsSummary(config: DaemonConfig): Promise<RunState[]> 
  * @param configPath - Optional path to config file; used for SIGHUP reload.
  */
 export async function runDaemon(config: DaemonConfig, configPath?: string): Promise<void> {
+	// Initialize log file before first log() call so all startup messages land there.
+	// Use first repo's project_root as cwd heuristic; fall back to cwd if no repos.
+	const logRoot = config.repos[0]?.project_root ?? ".";
+	await initLogFile(logRoot);
+
 	log("info", "Greenhouse daemon starting", {
 		repos: config.repos.map((r) => `${r.owner}/${r.repo}`),
 		poll_interval_minutes: config.poll_interval_minutes,
@@ -363,6 +523,9 @@ export async function runDaemon(config: DaemonConfig, configPath?: string): Prom
 	const pidPath = pidFilePath();
 	await mkdir(".greenhouse", { recursive: true });
 	await writePid(pidPath, process.pid);
+
+	// Kill any stale greenhouse-supervisor-* tmux sessions from prior daemon instances.
+	await cleanupStaleSupervisors(config, defaultExec);
 
 	let running = true;
 	let currentConfig = config;
