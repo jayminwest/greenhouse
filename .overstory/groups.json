@@ -230,8 +230,18 @@
 		"memberIssueIds": [
 			"greenhouse-db7b"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-07T16:42:26.425Z",
+		"completedAt": "2026-03-10T18:00:37.689Z"
+	},
+	{
+		"id": "group-55a27d04",
+		"name": "init-config-fix",
+		"memberIssueIds": [
+			"greenhouse-5fbe"
+		],
+		"status": "active",
+		"createdAt": "2026-03-10T18:01:31.220Z",
 		"completedAt": null
 	}
 ]
