@@ -102,20 +102,37 @@ describe("monitorSupervisors via runPollCycle", () => {
 	});
 
 	test("supervisor dead with shipped state: no additional state change", async () => {
+		// This test covers the race-window path: getActiveRuns sees "running",
+		// then supervisor writes "shipped" and dies, then isSupervisorAlive is false.
+		// In this test the shipped entry is the deduped state so getActiveRuns returns nothing,
+		// but the proactive cleanup scan checks git branch --list.
+		// The default mock returns empty for git branch --list → no cleanup triggered.
 		const run = makeRun({
 			status: "running",
 			supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
+			mergeBranch: "greenhouse/testrepo-a1b2",
 		});
 		await appendRun(run, TMP);
 
 		// Supervisor already wrote shipped state
-		await appendRun(makeRun({ status: "shipped", shippedAt: new Date().toISOString() }), TMP);
+		await appendRun(
+			makeRun({
+				status: "shipped",
+				shippedAt: new Date().toISOString(),
+				mergeBranch: "greenhouse/testrepo-a1b2",
+			}),
+			TMP,
+		);
 
 		const config = makeConfig();
 		// tmux has-session returns 1 → supervisor dead
 		const exec = makeExec((cmd) => {
 			if (cmd[0] === "tmux" && cmd[1] === "has-session") {
 				return { exitCode: 1, stdout: "", stderr: "can't find session" };
+			}
+			// git branch --list returns empty → no local branch → no cleanup
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "", stderr: "" };
 			}
 			return null;
 		});
@@ -176,6 +193,134 @@ describe("monitorSupervisors via runPollCycle", () => {
 		const runs = await readAllRuns(TMP);
 		const result = runs.find((r) => r.seedsId === "testrepo-a1b2");
 		expect(result?.status).toBe("running");
+	});
+});
+
+describe("post-ship cleanup", () => {
+	test("shipped run with local merge branch triggers cleanup (git checkout main, branch delete, pull)", async () => {
+		// Simulate the common post-ship scenario: supervisor wrote "shipped" to state.jsonl
+		// and exited. By the next poll cycle, the run is no longer in activeRuns (deduped).
+		// The proactive scan detects the local merge branch still exists and runs cleanup.
+		await appendRun(
+			makeRun({
+				status: "shipped",
+				shippedAt: new Date().toISOString(),
+				mergeBranch: "greenhouse/testrepo-a1b2",
+			}),
+			TMP,
+		);
+
+		const config = makeConfig();
+		const cleanupCmds: string[][] = [];
+
+		const exec = makeExec((cmd) => {
+			// git branch --list returns the branch name → cleanup needed
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "  greenhouse/testrepo-a1b2\n", stderr: "" };
+			}
+			// Track all git commands
+			if (cmd[0] === "git") {
+				cleanupCmds.push(cmd);
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		// Verify cleanup sequence: checkout main, delete branch, pull origin main
+		const checkoutCmd = cleanupCmds.find((c) => c[1] === "checkout" && c[2] === "main");
+		expect(checkoutCmd).toBeDefined();
+
+		const deleteBranchCmd = cleanupCmds.find(
+			(c) => c[1] === "branch" && c[2] === "-D" && c[3] === "greenhouse/testrepo-a1b2",
+		);
+		expect(deleteBranchCmd).toBeDefined();
+
+		const pullCmd = cleanupCmds.find(
+			(c) => c[1] === "pull" && c[2] === "origin" && c[3] === "main",
+		);
+		expect(pullCmd).toBeDefined();
+	});
+
+	test("shipped run without local merge branch: no cleanup triggered", async () => {
+		await appendRun(
+			makeRun({
+				status: "shipped",
+				shippedAt: new Date().toISOString(),
+				mergeBranch: "greenhouse/testrepo-a1b2",
+			}),
+			TMP,
+		);
+
+		const config = makeConfig();
+		let checkoutCalled = false;
+
+		const exec = makeExec((cmd) => {
+			// git branch --list returns empty → branch already gone
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			if (cmd[0] === "git" && cmd[1] === "checkout") {
+				checkoutCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		expect(checkoutCalled).toBe(false);
+	});
+
+	test("cleanup failure is non-fatal: poll cycle continues", async () => {
+		await appendRun(
+			makeRun({
+				status: "shipped",
+				shippedAt: new Date().toISOString(),
+				mergeBranch: "greenhouse/testrepo-a1b2",
+			}),
+			TMP,
+		);
+
+		const config = makeConfig();
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "  greenhouse/testrepo-a1b2\n", stderr: "" };
+			}
+			// git checkout main fails (dirty worktree)
+			if (cmd[0] === "git" && cmd[1] === "checkout") {
+				return {
+					exitCode: 1,
+					stdout: "",
+					stderr: "error: Your local changes would be overwritten",
+				};
+			}
+			return null;
+		});
+
+		// Should not throw even when cleanup fails
+		await expect(runPollCycle(config, exec)).resolves.toBeUndefined();
+	});
+
+	test("shipped run without mergeBranch: proactive scan skips it", async () => {
+		await appendRun(makeRun({ status: "shipped", shippedAt: new Date().toISOString() }), TMP);
+
+		const config = makeConfig();
+		let branchListCalled = false;
+
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				branchListCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		// No mergeBranch on the run → proactive scan skips it
+		expect(branchListCalled).toBe(false);
 	});
 });
 

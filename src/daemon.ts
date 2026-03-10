@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { BudgetTracker } from "./budget.ts";
 import { loadConfig } from "./config.ts";
 import { dispatchRun } from "./dispatcher.ts";
@@ -6,13 +6,71 @@ import { defaultExec } from "./exec.ts";
 import { ingestIssue } from "./ingester.ts";
 import { pidFilePath, removePid, writePid } from "./pid.ts";
 import { pollIssues } from "./poller.ts";
+import { cleanupAfterShip } from "./shipper.ts";
 import { appendRun, getActiveRuns, isIngested, readAllRuns, updateRun } from "./state.ts";
-import { isSupervisorAlive, killSupervisor, spawnSupervisor } from "./supervisor.ts";
+import {
+	isSupervisorAlive,
+	killSupervisor,
+	spawnSupervisor,
+	supervisorSpecPath,
+} from "./supervisor.ts";
 import type { DaemonConfig, ExecFn, GhIssue, RunState } from "./types.ts";
 
 function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: object): void {
 	const entry = { ts: new Date().toISOString(), level, msg, ...extra };
 	process.stderr.write(`${JSON.stringify(entry)}\n`);
+}
+
+/**
+ * Perform post-ship cleanup after a supervisor session exits with "shipped" status.
+ *
+ * Steps:
+ * 1. git checkout main (via cleanupAfterShip)
+ * 2. git branch -D <mergeBranch> (via cleanupAfterShip)
+ * 3. git pull origin main
+ * 4. Remove spec file (.greenhouse/<seedsId>-spec.md)
+ *
+ * Failures are logged but do not crash the daemon — cleanup is best-effort.
+ */
+async function performPostShipCleanup(
+	run: RunState,
+	config: DaemonConfig,
+	exec: ExecFn,
+): Promise<void> {
+	const repoConfig = config.repos.find((r) => `${r.owner}/${r.repo}` === run.ghRepo);
+	if (!repoConfig) {
+		log("warn", "Post-ship cleanup: repo config not found", {
+			event: "run.cleanup_skipped",
+			seedsId: run.seedsId,
+			ghRepo: run.ghRepo,
+		});
+		return;
+	}
+
+	const projectRoot = repoConfig.project_root;
+
+	try {
+		// Return to main and delete local merge branch
+		await cleanupAfterShip(run, repoConfig, exec);
+
+		// Pull latest main so the local repo is up to date
+		await exec(["git", "pull", "origin", "main"], { cwd: projectRoot });
+
+		// Remove spec file — ignore errors (file may already be gone)
+		const specPath = supervisorSpecPath(run.seedsId, projectRoot);
+		await unlink(specPath).catch(() => undefined);
+
+		log("info", "Post-ship cleanup complete", {
+			event: "run.cleanup_complete",
+			seedsId: run.seedsId,
+		});
+	} catch (err) {
+		log("warn", "Post-ship cleanup failed (non-fatal)", {
+			event: "run.cleanup_failed",
+			seedsId: run.seedsId,
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
 }
 
 /**
@@ -22,9 +80,8 @@ function log(level: "info" | "warn" | "error" | "debug", msg: string, extra?: ob
 async function monitorSupervisors(config: DaemonConfig, exec: ExecFn): Promise<void> {
 	for (const repo of config.repos) {
 		const projectRoot = repo.project_root;
-		const activeRuns = (await getActiveRuns(projectRoot)).filter(
-			(r) => r.ghRepo === `${repo.owner}/${repo.repo}`,
-		);
+		const repoStr = `${repo.owner}/${repo.repo}`;
+		const activeRuns = (await getActiveRuns(projectRoot)).filter((r) => r.ghRepo === repoStr);
 
 		for (const run of activeRuns) {
 			if (!run.supervisorSessionName) continue;
@@ -66,11 +123,18 @@ async function monitorSupervisors(config: DaemonConfig, exec: ExecFn): Promise<v
 				const allRuns = await readAllRuns(projectRoot);
 				const latest = allRuns.filter((r) => r.seedsId === run.seedsId).at(-1);
 
-				if (latest && (latest.status === "shipped" || latest.status === "failed")) {
+				if (latest && latest.status === "shipped") {
 					log("info", "Supervisor session exited", {
 						event: "supervisor.exited",
 						seedsId: run.seedsId,
-						status: latest.status,
+						status: "shipped",
+					});
+					await performPostShipCleanup(latest, config, exec);
+				} else if (latest && latest.status === "failed") {
+					log("info", "Supervisor session exited", {
+						event: "supervisor.exited",
+						seedsId: run.seedsId,
+						status: "failed",
 					});
 				} else {
 					// Supervisor exited without updating state — mark as failed
@@ -92,6 +156,36 @@ async function monitorSupervisors(config: DaemonConfig, exec: ExecFn): Promise<v
 			} catch (err) {
 				log("error", "Error monitoring supervisor", {
 					seedsId: run.seedsId,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+		}
+
+		// Proactive post-ship cleanup: scan shipped runs for pending local cleanup.
+		// The most common scenario is: supervisor writes "shipped" to state.jsonl and
+		// exits. Because readAllRuns deduplicates (last entry wins), by the next poll
+		// the run is no longer "active" — the loop above never sees it. Use
+		// `git branch --list <mergeBranch>` as a proxy for "cleanup not yet run":
+		// if the local merge branch still exists, cleanup is needed.
+		const allRunsForRepo = await readAllRuns(projectRoot);
+		for (const shipped of allRunsForRepo.filter(
+			(r) => r.status === "shipped" && r.mergeBranch && r.ghRepo === repoStr,
+		)) {
+			try {
+				const branchCheck = await exec(["git", "branch", "--list", shipped.mergeBranch as string], {
+					cwd: projectRoot,
+				});
+				if (branchCheck.exitCode === 0 && branchCheck.stdout.trim().length > 0) {
+					log("info", "Post-ship cleanup pending: local merge branch still exists", {
+						event: "run.cleanup_pending",
+						seedsId: shipped.seedsId,
+						mergeBranch: shipped.mergeBranch,
+					});
+					await performPostShipCleanup(shipped, config, exec);
+				}
+			} catch (err) {
+				log("error", "Error checking shipped run for cleanup", {
+					seedsId: shipped.seedsId,
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}
