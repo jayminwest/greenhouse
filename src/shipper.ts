@@ -1,6 +1,7 @@
-import { readdir } from "node:fs/promises";
+import { readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultExec } from "./exec.ts";
+import { killSupervisor, supervisorSessionName, supervisorSpecPath } from "./supervisor.ts";
 import type { DaemonConfig, ExecFn, RepoConfig, RunState } from "./types.ts";
 import { GREENHOUSE_DIR } from "./types.ts";
 
@@ -333,7 +334,7 @@ export async function cleanupAfterShip(
 	exec: ExecFn = defaultExec,
 ): Promise<void> {
 	const projectRoot = repoConfig.project_root;
-	const { mergeBranch } = run;
+	const { mergeBranch, seedsId } = run;
 
 	// Return to main
 	const checkoutResult = await exec(["git", "checkout", "main"], { cwd: projectRoot });
@@ -341,15 +342,24 @@ export async function cleanupAfterShip(
 		throw new Error(`git checkout main failed (dirty worktree?): ${checkoutResult.stderr.trim()}`);
 	}
 
+	// Pull latest main (ignore errors — might be offline or no remote)
+	await exec(["git", "pull", "origin", "main"], { cwd: projectRoot }).catch(() => undefined);
+
 	if (mergeBranch) {
 		// Delete local merge branch (ignore errors — branch may already be gone)
-		await exec(["git", "branch", "-D", mergeBranch], { cwd: projectRoot });
+		await exec(["git", "branch", "-D", mergeBranch], { cwd: projectRoot }).catch(() => undefined);
 
-		// If auto_merge is disabled, clean up the remote branch manually
-		if (!run.prNumber || !repoConfig) {
-			await exec(["git", "push", "origin", "--delete", mergeBranch], {
-				cwd: projectRoot,
-			}).catch(() => undefined);
-		}
+		// Delete remote branch (ignore errors — may already be deleted by GitHub auto-merge)
+		await exec(["git", "push", "origin", "--delete", mergeBranch], {
+			cwd: projectRoot,
+		}).catch(() => undefined);
 	}
+
+	// Kill supervisor tmux session (use stored session name if available, else derive it)
+	const sessionName = run.supervisorSessionName ?? supervisorSessionName(seedsId);
+	await killSupervisor(sessionName, exec).catch(() => undefined);
+
+	// Remove spec file (ignore errors — may already be cleaned up)
+	const specPath = supervisorSpecPath(seedsId, projectRoot);
+	await unlink(specPath).catch(() => undefined);
 }
