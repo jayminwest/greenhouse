@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { runPollCycle } from "./daemon.ts";
+import { cleanupStaleSupervisors, initLogFile, runPollCycle } from "./daemon.ts";
 import { appendRun, readAllRuns } from "./state.ts";
 import type { DaemonConfig, ExecResult, RunState } from "./types.ts";
 
@@ -102,20 +102,37 @@ describe("monitorSupervisors via runPollCycle", () => {
 	});
 
 	test("supervisor dead with shipped state: no additional state change", async () => {
+		// This test covers the race-window path: getActiveRuns sees "running",
+		// then supervisor writes "shipped" and dies, then isSupervisorAlive is false.
+		// In this test the shipped entry is the deduped state so getActiveRuns returns nothing,
+		// but the proactive cleanup scan checks git branch --list.
+		// The default mock returns empty for git branch --list → no cleanup triggered.
 		const run = makeRun({
 			status: "running",
 			supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
+			mergeBranch: "greenhouse/testrepo-a1b2",
 		});
 		await appendRun(run, TMP);
 
 		// Supervisor already wrote shipped state
-		await appendRun(makeRun({ status: "shipped", shippedAt: new Date().toISOString() }), TMP);
+		await appendRun(
+			makeRun({
+				status: "shipped",
+				shippedAt: new Date().toISOString(),
+				mergeBranch: "greenhouse/testrepo-a1b2",
+			}),
+			TMP,
+		);
 
 		const config = makeConfig();
 		// tmux has-session returns 1 → supervisor dead
 		const exec = makeExec((cmd) => {
 			if (cmd[0] === "tmux" && cmd[1] === "has-session") {
 				return { exitCode: 1, stdout: "", stderr: "can't find session" };
+			}
+			// git branch --list returns empty → no local branch → no cleanup
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "", stderr: "" };
 			}
 			return null;
 		});
@@ -128,7 +145,7 @@ describe("monitorSupervisors via runPollCycle", () => {
 		expect(latest?.status).toBe("shipped");
 	});
 
-	test("supervisor dead without state update: marks run as failed", async () => {
+	test("supervisor dead without state update and seeds open: marks run failed with retryable:true", async () => {
 		const run = makeRun({
 			status: "running",
 			supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
@@ -141,6 +158,22 @@ describe("monitorSupervisors via runPollCycle", () => {
 			if (cmd[0] === "tmux" && cmd[1] === "has-session") {
 				return { exitCode: 1, stdout: "", stderr: "can't find session" };
 			}
+			// git branch --list → no branch
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			// sd show → in_progress (not closed)
+			if (cmd[0] === "sd" && cmd[1] === "show") {
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify({
+						success: true,
+						command: "show",
+						issue: { id: "testrepo-a1b2", status: "in_progress" },
+					}),
+					stderr: "",
+				};
+			}
 			return null;
 		});
 
@@ -149,8 +182,8 @@ describe("monitorSupervisors via runPollCycle", () => {
 		const runs = await readAllRuns(TMP);
 		const latest = runs.filter((r) => r.seedsId === "testrepo-a1b2").at(-1);
 		expect(latest?.status).toBe("failed");
-		expect(latest?.retryable).toBe(false);
-		expect(latest?.error).toMatch(/supervisor exited without updating state/i);
+		expect(latest?.retryable).toBe(true);
+		expect(latest?.error).toMatch(/seeds not closed/i);
 	});
 
 	test("run without supervisorSessionName is skipped", async () => {
@@ -176,6 +209,134 @@ describe("monitorSupervisors via runPollCycle", () => {
 		const runs = await readAllRuns(TMP);
 		const result = runs.find((r) => r.seedsId === "testrepo-a1b2");
 		expect(result?.status).toBe("running");
+	});
+});
+
+describe("post-ship cleanup", () => {
+	test("shipped run with local merge branch triggers cleanup (git checkout main, branch delete, pull)", async () => {
+		// Simulate the common post-ship scenario: supervisor wrote "shipped" to state.jsonl
+		// and exited. By the next poll cycle, the run is no longer in activeRuns (deduped).
+		// The proactive scan detects the local merge branch still exists and runs cleanup.
+		await appendRun(
+			makeRun({
+				status: "shipped",
+				shippedAt: new Date().toISOString(),
+				mergeBranch: "greenhouse/testrepo-a1b2",
+			}),
+			TMP,
+		);
+
+		const config = makeConfig();
+		const cleanupCmds: string[][] = [];
+
+		const exec = makeExec((cmd) => {
+			// git branch --list returns the branch name → cleanup needed
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "  greenhouse/testrepo-a1b2\n", stderr: "" };
+			}
+			// Track all git commands
+			if (cmd[0] === "git") {
+				cleanupCmds.push(cmd);
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		// Verify cleanup sequence: checkout main, delete branch, pull origin main
+		const checkoutCmd = cleanupCmds.find((c) => c[1] === "checkout" && c[2] === "main");
+		expect(checkoutCmd).toBeDefined();
+
+		const deleteBranchCmd = cleanupCmds.find(
+			(c) => c[1] === "branch" && c[2] === "-D" && c[3] === "greenhouse/testrepo-a1b2",
+		);
+		expect(deleteBranchCmd).toBeDefined();
+
+		const pullCmd = cleanupCmds.find(
+			(c) => c[1] === "pull" && c[2] === "origin" && c[3] === "main",
+		);
+		expect(pullCmd).toBeDefined();
+	});
+
+	test("shipped run without local merge branch: no cleanup triggered", async () => {
+		await appendRun(
+			makeRun({
+				status: "shipped",
+				shippedAt: new Date().toISOString(),
+				mergeBranch: "greenhouse/testrepo-a1b2",
+			}),
+			TMP,
+		);
+
+		const config = makeConfig();
+		let checkoutCalled = false;
+
+		const exec = makeExec((cmd) => {
+			// git branch --list returns empty → branch already gone
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			if (cmd[0] === "git" && cmd[1] === "checkout") {
+				checkoutCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		expect(checkoutCalled).toBe(false);
+	});
+
+	test("cleanup failure is non-fatal: poll cycle continues", async () => {
+		await appendRun(
+			makeRun({
+				status: "shipped",
+				shippedAt: new Date().toISOString(),
+				mergeBranch: "greenhouse/testrepo-a1b2",
+			}),
+			TMP,
+		);
+
+		const config = makeConfig();
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "  greenhouse/testrepo-a1b2\n", stderr: "" };
+			}
+			// git checkout main fails (dirty worktree)
+			if (cmd[0] === "git" && cmd[1] === "checkout") {
+				return {
+					exitCode: 1,
+					stdout: "",
+					stderr: "error: Your local changes would be overwritten",
+				};
+			}
+			return null;
+		});
+
+		// Should not throw even when cleanup fails
+		await expect(runPollCycle(config, exec)).resolves.toBeUndefined();
+	});
+
+	test("shipped run without mergeBranch: proactive scan skips it", async () => {
+		await appendRun(makeRun({ status: "shipped", shippedAt: new Date().toISOString() }), TMP);
+
+		const config = makeConfig();
+		let branchListCalled = false;
+
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				branchListCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		// No mergeBranch on the run → proactive scan skips it
+		expect(branchListCalled).toBe(false);
 	});
 });
 
@@ -536,5 +697,254 @@ describe("runPollCycle dispatch + supervisor spawn", () => {
 		const runs = await readAllRuns(TMP);
 		const failed = runs.find((r) => r.status === "failed");
 		expect(failed).toBeDefined();
+	});
+});
+
+describe("initLogFile and log file writing", () => {
+	test("initLogFile creates daemon.log file", async () => {
+		await initLogFile(TMP);
+		// The log file directory should exist
+		expect(existsSync(join(TMP, ".greenhouse"))).toBe(true);
+	});
+
+	test("log() writes to daemon.log after initLogFile()", async () => {
+		await initLogFile(TMP);
+		// Import runPollCycle so log() is triggered — use a no-op config
+		const config = makeConfig();
+		const exec = makeExec();
+		await runPollCycle(config, exec);
+
+		const logPath = join(TMP, ".greenhouse", "daemon.log");
+		expect(existsSync(logPath)).toBe(true);
+		const contents = readFileSync(logPath, "utf8");
+		// runPollCycle calls log() with Poll cycle complete
+		expect(contents).toContain("Poll cycle complete");
+	});
+});
+
+describe("cleanupStaleSupervisors", () => {
+	test("kills sessions not associated with active runs", async () => {
+		// No active runs in state — all greenhouse-supervisor-* sessions are stale
+		const config = makeConfig();
+		const killedSessions: string[] = [];
+
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "tmux" && cmd[1] === "list-sessions") {
+				return {
+					exitCode: 0,
+					stdout: "greenhouse-supervisor-testrepo-a1b2\nother-session\n",
+					stderr: "",
+				};
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "display-message") {
+				return { exitCode: 0, stdout: "9999\n", stderr: "" };
+			}
+			if (cmd[0] === "pgrep") {
+				return { exitCode: 1, stdout: "", stderr: "" };
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "kill-session") {
+				killedSessions.push(cmd[3] ?? "");
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await cleanupStaleSupervisors(config, exec);
+
+		// Only the greenhouse-supervisor- session should be killed (not other-session)
+		expect(killedSessions).toContain("greenhouse-supervisor-testrepo-a1b2");
+		expect(killedSessions).not.toContain("other-session");
+	});
+
+	test("preserves sessions associated with active runs", async () => {
+		// Active run with supervisorSessionName set
+		await appendRun(
+			makeRun({
+				status: "running",
+				supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
+			}),
+			TMP,
+		);
+
+		const config = makeConfig();
+		let killCalled = false;
+
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "tmux" && cmd[1] === "list-sessions") {
+				return {
+					exitCode: 0,
+					stdout: "greenhouse-supervisor-testrepo-a1b2\n",
+					stderr: "",
+				};
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "kill-session") {
+				killCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await cleanupStaleSupervisors(config, exec);
+
+		// Active session should NOT be killed
+		expect(killCalled).toBe(false);
+	});
+
+	test("no-op when tmux has no greenhouse-supervisor- sessions", async () => {
+		const config = makeConfig();
+		let killCalled = false;
+
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "tmux" && cmd[1] === "list-sessions") {
+				return { exitCode: 0, stdout: "other-session\n", stderr: "" };
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "kill-session") {
+				killCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await cleanupStaleSupervisors(config, exec);
+		expect(killCalled).toBe(false);
+	});
+
+	test("no-op when tmux list-sessions fails", async () => {
+		const config = makeConfig();
+		let killCalled = false;
+
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "tmux" && cmd[1] === "list-sessions") {
+				return { exitCode: 1, stdout: "", stderr: "no server running" };
+			}
+			if (cmd[0] === "tmux" && cmd[1] === "kill-session") {
+				killCalled = true;
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await cleanupStaleSupervisors(config, exec);
+		expect(killCalled).toBe(false);
+	});
+});
+
+describe("monitorSupervisors: daemon shipping when supervisor exits with seeds closed", () => {
+	test("supervisor exits + seeds closed → daemon ships run", async () => {
+		const run = makeRun({
+			status: "running",
+			supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
+			mergeBranch: "greenhouse/testrepo-a1b2",
+		});
+		await appendRun(run, TMP);
+
+		const config = makeConfig();
+		const exec = makeExec((cmd) => {
+			// Supervisor is dead
+			if (cmd[0] === "tmux" && cmd[1] === "has-session") {
+				return { exitCode: 1, stdout: "", stderr: "can't find session" };
+			}
+			// git branch --list → no local branch (no proactive cleanup needed)
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			// seeds show → closed
+			if (cmd[0] === "sd" && cmd[1] === "show") {
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify({
+						success: true,
+						command: "show",
+						issue: { id: "testrepo-a1b2", status: "closed" },
+					}),
+					stderr: "",
+				};
+			}
+			// Pre-flight: git worktree list
+			if (cmd[0] === "git" && cmd[1] === "worktree") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			// Pre-flight: bun test/lint/typecheck
+			if (cmd[0] === "bun") {
+				return { exitCode: 0, stdout: "All tests passed", stderr: "" };
+			}
+			// git diff (pre-ship validation)
+			if (cmd[0] === "git" && cmd[1] === "diff") {
+				return { exitCode: 1, stdout: "diff content", stderr: "" }; // non-zero → has commits
+			}
+			// git push (shipRun)
+			if (cmd[0] === "git" && cmd[1] === "push") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			// gh pr create → PR URL
+			if (cmd[0] === "gh" && cmd[1] === "pr" && cmd[2] === "create") {
+				return {
+					exitCode: 0,
+					stdout: "https://github.com/testowner/testrepo/pull/99\n",
+					stderr: "",
+				};
+			}
+			// gh issue comment
+			if (cmd[0] === "gh" && cmd[1] === "issue" && cmd[2] === "comment") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			// git checkout main (cleanupAfterShip)
+			if (cmd[0] === "git" && cmd[1] === "checkout") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			// git branch -D (cleanupAfterShip)
+			if (cmd[0] === "git" && cmd[1] === "branch") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		const runs = await readAllRuns(TMP);
+		const latest = runs.filter((r) => r.seedsId === "testrepo-a1b2").at(-1);
+		expect(latest?.status).toBe("shipped");
+		expect(latest?.prUrl).toBe("https://github.com/testowner/testrepo/pull/99");
+		expect(latest?.prNumber).toBe(99);
+	});
+
+	test("supervisor exits + seeds NOT closed → marks run failed with retryable:true", async () => {
+		const run = makeRun({
+			status: "running",
+			supervisorSessionName: "greenhouse-supervisor-testrepo-a1b2",
+			mergeBranch: "greenhouse/testrepo-a1b2",
+		});
+		await appendRun(run, TMP);
+
+		const config = makeConfig();
+		const exec = makeExec((cmd) => {
+			if (cmd[0] === "tmux" && cmd[1] === "has-session") {
+				return { exitCode: 1, stdout: "", stderr: "can't find session" };
+			}
+			if (cmd[0] === "git" && cmd[1] === "branch" && cmd[2] === "--list") {
+				return { exitCode: 0, stdout: "", stderr: "" };
+			}
+			// seeds show → in_progress (not closed)
+			if (cmd[0] === "sd" && cmd[1] === "show") {
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify({
+						success: true,
+						command: "show",
+						issue: { id: "testrepo-a1b2", status: "in_progress" },
+					}),
+					stderr: "",
+				};
+			}
+			return null;
+		});
+
+		await runPollCycle(config, exec);
+
+		const runs = await readAllRuns(TMP);
+		const latest = runs.filter((r) => r.seedsId === "testrepo-a1b2").at(-1);
+		expect(latest?.status).toBe("failed");
+		expect(latest?.retryable).toBe(true);
+		expect(latest?.error).toMatch(/seeds not closed/i);
 	});
 });
