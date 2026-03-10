@@ -240,9 +240,9 @@
 		"memberIssueIds": [
 			"greenhouse-5fbe"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-03-10T18:01:31.220Z",
-		"completedAt": null
+		"completedAt": "2026-03-10T20:59:31.942Z"
 	},
 	{
 		"id": "group-65c87946",
