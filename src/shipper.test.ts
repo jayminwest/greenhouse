@@ -433,4 +433,79 @@ describe("cleanupAfterShip", () => {
 			"git checkout main failed",
 		);
 	});
+
+	it("pulls origin main after checkout", async () => {
+		const run = makeRun({ prNumber: 99 });
+		const commands: string[][] = [];
+		const exec: ExecFn = async (cmd) => {
+			commands.push(cmd);
+			return ok();
+		};
+
+		await cleanupAfterShip(run, makeRepoConfig(projectRoot), exec);
+
+		expect(
+			commands.some((c) => c.includes("pull") && c.includes("origin") && c.includes("main")),
+		).toBe(true);
+		// pull must come after checkout
+		const checkoutIdx = commands.findIndex((c) => c.includes("checkout") && c.includes("main"));
+		const pullIdx = commands.findIndex(
+			(c) => c.includes("pull") && c.includes("origin") && c.includes("main"),
+		);
+		expect(pullIdx).toBeGreaterThan(checkoutIdx);
+	});
+
+	it("deletes remote merge branch", async () => {
+		const run = makeRun({ prNumber: 99 });
+		const commands: string[][] = [];
+		const exec: ExecFn = async (cmd) => {
+			commands.push(cmd);
+			return ok();
+		};
+
+		await cleanupAfterShip(run, makeRepoConfig(projectRoot), exec);
+
+		expect(
+			commands.some(
+				(c) =>
+					c.includes("push") &&
+					c.includes("origin") &&
+					c.includes("--delete") &&
+					c.includes("greenhouse/proj-001a"),
+			),
+		).toBe(true);
+	});
+
+	it("kills supervisor tmux session", async () => {
+		const run = makeRun({ prNumber: 99, supervisorSessionName: "greenhouse-supervisor-proj-001a" });
+		const commands: string[][] = [];
+		const exec: ExecFn = async (cmd) => {
+			commands.push(cmd);
+			// kill-session: report "session not found" so killSupervisor treats it as already gone
+			if (cmd.includes("kill-session")) {
+				return fail("can't find session");
+			}
+			return ok();
+		};
+
+		await cleanupAfterShip(run, makeRepoConfig(projectRoot), exec);
+
+		// tmux display-message and/or tmux kill-session should have been invoked
+		expect(commands.some((c) => c.includes("tmux"))).toBe(true);
+	});
+
+	it("uses derived session name when supervisorSessionName not on run", async () => {
+		const run = makeRun({ prNumber: 99 }); // no supervisorSessionName
+		const commands: string[][] = [];
+		const exec: ExecFn = async (cmd) => {
+			commands.push(cmd);
+			if (cmd.includes("kill-session")) return fail("can't find session");
+			return ok();
+		};
+
+		await cleanupAfterShip(run, makeRepoConfig(projectRoot), exec);
+
+		// Should still attempt tmux commands using derived name
+		expect(commands.some((c) => c.includes("tmux"))).toBe(true);
+	});
 });
