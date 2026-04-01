@@ -362,4 +362,8 @@ export async function cleanupAfterShip(
 	// Remove spec file (ignore errors — may already be cleaned up)
 	const specPath = supervisorSpecPath(seedsId, projectRoot);
 	await unlink(specPath).catch(() => undefined);
+
+	// Remove stale session-branch.txt (ignore errors — may not exist)
+	const sessionBranchPath = join(projectRoot, ".overstory", "session-branch.txt");
+	await unlink(sessionBranchPath).catch(() => undefined);
 }
