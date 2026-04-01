@@ -256,5 +256,15 @@
 		"status": "completed",
 		"createdAt": "2026-03-10T18:14:56.055Z",
 		"completedAt": "2026-03-10T18:36:41.259Z"
+	},
+	{
+		"id": "group-e0f9f70c",
+		"name": "session-branch-cleanup",
+		"memberIssueIds": [
+			"greenhouse-0cc1"
+		],
+		"status": "active",
+		"createdAt": "2026-04-01T16:36:35.330Z",
+		"completedAt": null
 	}
 ]
