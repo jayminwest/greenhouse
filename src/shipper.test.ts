@@ -508,4 +508,25 @@ describe("cleanupAfterShip", () => {
 		// Should still attempt tmux commands using derived name
 		expect(commands.some((c) => c.includes("tmux"))).toBe(true);
 	});
+
+	it("deletes .overstory/session-branch.txt if present", async () => {
+		const run = makeRun({ prNumber: 99 });
+		const sessionBranchPath = join(projectRoot, ".overstory", "session-branch.txt");
+		await Bun.write(sessionBranchPath, "greenhouse/proj-001a");
+
+		const exec: ExecFn = async () => ok();
+
+		await cleanupAfterShip(run, makeRepoConfig(projectRoot), exec);
+
+		const exists = await Bun.file(sessionBranchPath).exists();
+		expect(exists).toBe(false);
+	});
+
+	it("does not throw when .overstory/session-branch.txt does not exist", async () => {
+		const run = makeRun({ prNumber: 99 });
+		const exec: ExecFn = async () => ok();
+
+		// Should not throw even if the file is absent
+		await expect(cleanupAfterShip(run, makeRepoConfig(projectRoot), exec)).resolves.toBeUndefined();
+	});
 });
