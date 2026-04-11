@@ -5,7 +5,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Command } from "commander";
-import { computeBudget } from "../budget.ts";
 import { loadConfig } from "../config.ts";
 import { isProcessAlive } from "../pid.ts";
 import { getActiveRuns, readAllRuns } from "../state.ts";
@@ -116,7 +115,13 @@ export function registerStatusCommand(program: Command): void {
 
 			// Budget
 			const dailyCap = config?.daily_cap ?? 5;
-			const budget = computeBudget(allRuns, dailyCap);
+			// TODO(v0.2.0): budget tracking removed in daemon rewrite
+			const budget = {
+				date: new Date().toISOString().slice(0, 10),
+				dispatched: 0,
+				cap: dailyCap,
+				remaining: dailyCap,
+			};
 
 			// Next poll
 			const nextPollIn =

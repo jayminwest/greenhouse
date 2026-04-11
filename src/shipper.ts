@@ -1,7 +1,6 @@
-import { readdir, unlink } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultExec } from "./exec.ts";
-import { killSupervisor, supervisorSessionName, supervisorSpecPath } from "./supervisor.ts";
 import type { DaemonConfig, ExecFn, RepoConfig, RunState } from "./types.ts";
 import { GREENHOUSE_DIR } from "./types.ts";
 
@@ -334,7 +333,7 @@ export async function cleanupAfterShip(
 	exec: ExecFn = defaultExec,
 ): Promise<void> {
 	const projectRoot = repoConfig.project_root;
-	const { mergeBranch, seedsId } = run;
+	const { mergeBranch } = run;
 
 	// Return to main
 	const checkoutResult = await exec(["git", "checkout", "main"], { cwd: projectRoot });
@@ -354,16 +353,4 @@ export async function cleanupAfterShip(
 			cwd: projectRoot,
 		}).catch(() => undefined);
 	}
-
-	// Kill supervisor tmux session (use stored session name if available, else derive it)
-	const sessionName = run.supervisorSessionName ?? supervisorSessionName(seedsId);
-	await killSupervisor(sessionName, exec).catch(() => undefined);
-
-	// Remove spec file (ignore errors — may already be cleaned up)
-	const specPath = supervisorSpecPath(seedsId, projectRoot);
-	await unlink(specPath).catch(() => undefined);
-
-	// Remove stale session-branch.txt (ignore errors — may not exist)
-	const sessionBranchPath = join(projectRoot, ".overstory", "session-branch.txt");
-	await unlink(sessionBranchPath).catch(() => undefined);
 }

@@ -5,7 +5,6 @@
  */
 
 import type { Command } from "commander";
-import { getDailyBudget } from "../budget.ts";
 import { loadConfig } from "../config.ts";
 import { dispatchRun } from "../dispatcher.ts";
 import { defaultExec } from "../exec.ts";
@@ -106,14 +105,7 @@ export function registerIngestCommand(program: Command): void {
 				repoConfig.project_root,
 			);
 
-			// Dispatch agent (warn if budget exhausted, but proceed — manual ingest bypasses limits)
-			const dailyCap = daemonConfig?.daily_cap ?? 5;
-			const budget = await getDailyBudget(dailyCap, repoConfig.project_root);
-			if (budget.remaining <= 0) {
-				process.stderr.write(
-					`Warning: daily budget exhausted (${budget.dispatched}/${budget.cap} dispatched today). Proceeding anyway (manual ingest).\n`,
-				);
-			}
+			// Dispatch agent (manual ingest bypasses daily limits)
 			process.stdout.write(`Dispatching agent for ${seedsId}...\n`);
 			const dispatchResult = await dispatchRun(seedsId, repoConfig);
 
