@@ -298,5 +298,15 @@
 		"status": "active",
 		"createdAt": "2026-04-11T19:17:36.015Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-e36b5f1d",
+		"name": "v0.2.0-config",
+		"memberIssueIds": [
+			"greenhouse-a2e4"
+		],
+		"status": "active",
+		"createdAt": "2026-04-11T19:46:13.716Z",
+		"completedAt": null
 	}
 ]
