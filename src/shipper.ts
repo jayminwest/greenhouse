@@ -215,7 +215,7 @@ function extractPrNumber(prUrl: string): number {
  */
 export async function shipRun(
 	run: RunState,
-	repoConfig: RepoConfig,
+	_repoConfig: RepoConfig,
 	opts: ShipOptions = {},
 	exec: ExecFn = defaultExec,
 ): Promise<ShipResult> {
@@ -228,7 +228,7 @@ export async function shipRun(
 		throw new Error(`Run ${seedsId} missing GitHub issue info`);
 	}
 
-	const projectRoot = repoConfig.project_root;
+	const projectRoot = "."; // TODO(v0.2.0): use per-run clone dir
 
 	// --- Pre-flight checks ---
 	const preflight = await runPreflight(projectRoot, exec);
@@ -342,10 +342,10 @@ export async function shipRun(
  */
 export async function cleanupAfterShip(
 	run: RunState,
-	repoConfig: RepoConfig,
+	_repoConfig: RepoConfig,
 	exec: ExecFn = defaultExec,
 ): Promise<void> {
-	const projectRoot = repoConfig.project_root;
+	const projectRoot = "."; // TODO(v0.2.0): use per-run clone dir
 	const { mergeBranch } = run;
 
 	// Return to main

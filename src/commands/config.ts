@@ -41,16 +41,17 @@ export function registerConfigCommand(program: Command): void {
 
 			process.stdout.write(`# Resolved config: ${configPath}\n\n`);
 			process.stdout.write(`version: ${config.version}\n`);
+			process.stdout.write(`clone_root: ${config.clone_root}\n`);
 			process.stdout.write(`poll_interval_minutes: ${config.poll_interval_minutes}\n`);
-			process.stdout.write(`daily_cap: ${config.daily_cap}\n`);
+			process.stdout.write(`run_timeout_minutes: ${config.run_timeout_minutes}\n`);
 			process.stdout.write(`\nrepos:\n`);
 			for (const repo of config.repos) {
 				process.stdout.write(`  - owner: ${repo.owner}\n`);
 				process.stdout.write(`    repo: ${repo.repo}\n`);
-				process.stdout.write(`    labels: [${repo.labels.join(", ")}]\n`);
-				process.stdout.write(`    project_root: ${repo.project_root}\n`);
+				process.stdout.write(`    ready_label: ${repo.ready_label}\n`);
+				if (repo.failed_label) process.stdout.write(`    failed_label: ${repo.failed_label}\n`);
+				if (repo.clone_url) process.stdout.write(`    clone_url: ${repo.clone_url}\n`);
+				if (repo.base_branch) process.stdout.write(`    base_branch: ${repo.base_branch}\n`);
 			}
-			process.stdout.write(`\ndispatch:\n`);
-			process.stdout.write(`  run_timeout_minutes: ${config.dispatch.run_timeout_minutes}\n`);
 		});
 }

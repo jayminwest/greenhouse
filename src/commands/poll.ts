@@ -4,6 +4,7 @@
  * Useful for testing and one-off runs.
  */
 
+import { dirname } from "node:path";
 import type { Command } from "commander";
 import { loadConfig } from "../config.ts";
 import { runPollCycle } from "../daemon.ts";
@@ -28,6 +29,8 @@ export interface DryRunRepoResult {
 }
 
 export async function runDryPoll(config: DaemonConfig, exec: ExecFn): Promise<DryRunRepoResult[]> {
+	// Derive state root from clone_root (parent dir, e.g. ~/.greenhouse from ~/.greenhouse/runs)
+	const stateRoot = dirname(config.clone_root);
 	const results: DryRunRepoResult[] = [];
 	for (const repo of config.repos) {
 		const repoStr = `${repo.owner}/${repo.repo}`;
@@ -35,7 +38,7 @@ export async function runDryPoll(config: DaemonConfig, exec: ExecFn): Promise<Dr
 			const issues = await pollIssues(repo, exec);
 			const issueResults: DryRunIssueResult[] = [];
 			for (const issue of issues) {
-				const alreadyIngested = await isIngested(repo.project_root, repoStr, issue.number);
+				const alreadyIngested = await isIngested(stateRoot, repoStr, issue.number);
 				issueResults.push({
 					number: issue.number,
 					title: issue.title,
@@ -100,6 +103,7 @@ export function registerPollCommand(program: Command): void {
 
 			if (!opts.dispatch) {
 				// --no-dispatch: poll + ingest, skip dispatch
+				const stateRoot = dirname(config.clone_root);
 				process.stdout.write("Polling and ingesting issues (dispatch skipped)\n");
 				for (const repo of config.repos) {
 					const repoStr = `${repo.owner}/${repo.repo}`;
@@ -107,7 +111,7 @@ export function registerPollCommand(program: Command): void {
 						const issues = await pollIssues(repo, exec);
 						process.stdout.write(`${repoStr}: ${issues.length} issue(s) found\n`);
 						for (const issue of issues) {
-							const alreadyIngested = await isIngested(repo.project_root, repoStr, issue.number);
+							const alreadyIngested = await isIngested(stateRoot, repoStr, issue.number);
 							if (alreadyIngested) {
 								process.stdout.write(`  #${issue.number} already ingested, skipping\n`);
 								continue;
@@ -126,7 +130,7 @@ export function registerPollCommand(program: Command): void {
 									ingestedAt: now,
 									updatedAt: now,
 								};
-								await appendRun(ingestedRun, repo.project_root);
+								await appendRun(ingestedRun, stateRoot);
 								process.stdout.write(`  #${issue.number} ingested as ${seedsId}\n`);
 							} catch (err) {
 								process.stderr.write(

@@ -131,14 +131,12 @@ const STATUS_ICON: Record<CheckStatus, string> = {
 
 function defaultConfigYaml(): string {
 	return `version: "1"
+clone_root: ~/.greenhouse/runs
 
 repos: []
 
 poll_interval_minutes: 10
-daily_cap: 5
-
-dispatch:
-  run_timeout_minutes: 60
+run_timeout_minutes: 90
 `;
 }
 

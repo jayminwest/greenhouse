@@ -63,8 +63,9 @@ describe("initGreenhouseDir", () => {
 
 		const configContent = await Bun.file(join(TEST_DIR, ".greenhouse", "config.yaml")).text();
 		expect(configContent).toContain("poll_interval_minutes: 10");
-		expect(configContent).toContain("daily_cap: 5");
-		expect(configContent).toContain("agent-ready");
+		expect(configContent).toContain("run_timeout_minutes: 90");
+		expect(configContent).toContain("clone_root: ~/.greenhouse/runs");
+		expect(configContent).toContain("greenhouse:ready");
 	});
 
 	it("state.jsonl is created as empty file", async () => {

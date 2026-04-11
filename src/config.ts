@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DaemonConfig, RepoConfig } from "./types.ts";
 import { CONFIG_FILE, GREENHOUSE_DIR } from "./types.ts";
@@ -222,14 +223,28 @@ export function parseYaml(text: string): Record<string, unknown> {
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: Omit<DaemonConfig, "repos" | "version"> = {
+	clone_root: join(homedir(), ".greenhouse", "runs"),
 	poll_interval_minutes: 10,
-	daily_cap: 5,
-	dispatch: {
-		run_timeout_minutes: 90,
-	},
+	run_timeout_minutes: 90,
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Expand a leading ~ to the user's home directory. */
+function expandHome(p: string): string {
+	if (p === "~" || p.startsWith("~/")) {
+		return join(homedir(), p.slice(2));
+	}
+	return p;
+}
+
 // ─── Validation ───────────────────────────────────────────────────────────────
+
+/** Legacy top-level fields removed in v0.2.0. */
+const LEGACY_TOP_FIELDS = ["daily_cap", "dispatch", "shipping"] as const;
+
+/** Legacy per-repo fields removed in v0.2.0. */
+const LEGACY_REPO_FIELDS = ["labels", "project_root"] as const;
 
 function isRepoConfig(r: unknown): r is RepoConfig {
 	if (!r || typeof r !== "object") return false;
@@ -237,19 +252,42 @@ function isRepoConfig(r: unknown): r is RepoConfig {
 	return (
 		typeof obj.owner === "string" &&
 		typeof obj.repo === "string" &&
-		Array.isArray(obj.labels) &&
-		typeof obj.project_root === "string"
+		typeof obj.ready_label === "string"
 	);
 }
 
 function validateConfig(raw: Record<string, unknown>): DaemonConfig {
+	// Reject legacy top-level fields
+	for (const field of LEGACY_TOP_FIELDS) {
+		if (field in raw) {
+			throw new Error(
+				`config.yaml: \`${field}\` was removed in v0.2.0. Remove it from your config.`,
+			);
+		}
+	}
+
 	if (!Array.isArray(raw.repos) || raw.repos.length === 0) {
 		throw new Error("config.yaml: `repos` is required and must be a non-empty array");
 	}
+
 	for (const r of raw.repos) {
+		if (!r || typeof r !== "object") {
+			throw new Error(
+				"config.yaml: each repo must have owner, repo (strings) and ready_label (string)",
+			);
+		}
+		const obj = r as Record<string, unknown>;
+		// Reject legacy per-repo fields
+		for (const field of LEGACY_REPO_FIELDS) {
+			if (field in obj) {
+				throw new Error(
+					`config.yaml: repo field \`${field}\` was removed in v0.2.0. Remove it from your config.`,
+				);
+			}
+		}
 		if (!isRepoConfig(r)) {
 			throw new Error(
-				"config.yaml: each repo must have owner, repo (strings), labels (array), and project_root (string)",
+				"config.yaml: each repo must have owner, repo (strings) and ready_label (string)",
 			);
 		}
 	}
@@ -257,25 +295,21 @@ function validateConfig(raw: Record<string, unknown>): DaemonConfig {
 	const repos = raw.repos as RepoConfig[];
 	const version = typeof raw.version === "string" ? raw.version : "1";
 
-	const dispatch =
-		raw.dispatch && typeof raw.dispatch === "object"
-			? (raw.dispatch as Record<string, unknown>)
-			: {};
+	const rawCloneRoot =
+		typeof raw.clone_root === "string" ? raw.clone_root : DEFAULT_CONFIG.clone_root;
 
 	return {
 		version,
 		repos,
+		clone_root: expandHome(rawCloneRoot),
 		poll_interval_minutes:
 			typeof raw.poll_interval_minutes === "number"
 				? raw.poll_interval_minutes
 				: DEFAULT_CONFIG.poll_interval_minutes,
-		daily_cap: typeof raw.daily_cap === "number" ? raw.daily_cap : DEFAULT_CONFIG.daily_cap,
-		dispatch: {
-			run_timeout_minutes:
-				typeof dispatch.run_timeout_minutes === "number"
-					? dispatch.run_timeout_minutes
-					: DEFAULT_CONFIG.dispatch.run_timeout_minutes,
-		},
+		run_timeout_minutes:
+			typeof raw.run_timeout_minutes === "number"
+				? raw.run_timeout_minutes
+				: DEFAULT_CONFIG.run_timeout_minutes,
 	};
 }
 

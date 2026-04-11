@@ -7,19 +7,16 @@ import { join } from "node:path";
 import type { Command } from "commander";
 
 const DEFAULT_CONFIG_YAML = (owner: string, repo: string) => `version: "1"
+clone_root: ~/.greenhouse/runs
 
 repos:
   - owner: ${owner}
     repo: ${repo}
-    labels:
-      - agent-ready
-    project_root: ${process.cwd()}
+    ready_label: "greenhouse:ready"
+    failed_label: "greenhouse:failed"
 
 poll_interval_minutes: 10
-daily_cap: 5
-
-dispatch:
-  run_timeout_minutes: 90
+run_timeout_minutes: 90
 `;
 
 const GITIGNORE_CONTENT = `daemon.pid

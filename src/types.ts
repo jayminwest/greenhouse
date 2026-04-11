@@ -68,18 +68,18 @@ export interface RunRecord {
 export interface RepoConfig {
 	owner: string;
 	repo: string;
-	labels: string[];
-	project_root: string;
+	ready_label: string;
+	failed_label?: string;
+	clone_url?: string;
+	base_branch?: string;
 }
 
 export interface DaemonConfig {
 	version: string;
 	repos: RepoConfig[];
+	clone_root: string;
 	poll_interval_minutes: number;
-	daily_cap: number;
-	dispatch: {
-		run_timeout_minutes: number;
-	};
+	run_timeout_minutes: number;
 }
 
 export interface CloneContext {

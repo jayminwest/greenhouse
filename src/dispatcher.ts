@@ -83,11 +83,15 @@ The base branch \`${mergeBranch}\` is greenhouse's merge target. All work must l
  * Overstory agents will branch off this, and their work will be
  * merged back into it before shipping as a PR.
  */
-async function createMergeBranch(seedsId: string, repo: RepoConfig, exec: ExecFn): Promise<string> {
+async function createMergeBranch(
+	seedsId: string,
+	_repo: RepoConfig,
+	exec: ExecFn,
+): Promise<string> {
 	const mergeBranch = `greenhouse/${seedsId}`;
 
 	const { exitCode, stderr } = await exec(["git", "branch", mergeBranch, "HEAD"], {
-		cwd: repo.project_root,
+		cwd: ".", // TODO(v0.2.0): use per-run clone dir
 	});
 
 	if (exitCode !== 0) {
@@ -103,18 +107,18 @@ async function createMergeBranch(seedsId: string, repo: RepoConfig, exec: ExecFn
  */
 async function setupSessionBranch(
 	mergeBranch: string,
-	repo: RepoConfig,
+	_repo: RepoConfig,
 	exec: ExecFn,
 ): Promise<void> {
 	const { exitCode, stderr } = await exec(["git", "checkout", mergeBranch], {
-		cwd: repo.project_root,
+		cwd: ".", // TODO(v0.2.0): use per-run clone dir
 	});
 
 	if (exitCode !== 0) {
 		throw new Error(`Failed to checkout merge branch ${mergeBranch}: ${stderr.trim()}`);
 	}
 
-	const sessionBranchPath = join(repo.project_root, ".overstory", "session-branch.txt");
+	const sessionBranchPath = join(".", ".overstory", "session-branch.txt"); // TODO(v0.2.0): use per-run clone dir
 	await Bun.write(sessionBranchPath, mergeBranch);
 }
 
@@ -122,10 +126,10 @@ async function setupSessionBranch(
  * Ensure the coordinator is running. Checks status first; starts if not running.
  * Returns the coordinator's agent name.
  */
-async function ensureCoordinator(repo: RepoConfig, exec: ExecFn): Promise<string> {
+async function ensureCoordinator(_repo: RepoConfig, exec: ExecFn): Promise<string> {
 	// Check if coordinator is already running
 	const statusResult = await exec(["ov", "coordinator", "status", "--json"], {
-		cwd: repo.project_root,
+		cwd: ".", // TODO(v0.2.0): use per-run clone dir
 	});
 
 	if (statusResult.exitCode === 0) {
@@ -137,7 +141,7 @@ async function ensureCoordinator(repo: RepoConfig, exec: ExecFn): Promise<string
 
 	// Start the coordinator
 	const startResult = await exec(["ov", "coordinator", "start", "--watchdog", "--json"], {
-		cwd: repo.project_root,
+		cwd: ".", // TODO(v0.2.0): use per-run clone dir
 	});
 
 	if (startResult.exitCode !== 0) {
@@ -191,7 +195,7 @@ export async function dispatchRun(
 	if (context) {
 		body = buildDispatchMessage(seedsId, mergeBranch, context);
 		// Also write spec file for reference
-		await writeSpecFile(seedsId, body, repo.project_root);
+		await writeSpecFile(seedsId, body, "."); // TODO(v0.2.0): use per-run clone dir
 	} else {
 		body = `Implement seeds task ${seedsId}. Merge all work into branch \`${mergeBranch}\`. Close the seeds issue when done: \`sd close ${seedsId}\`.`;
 	}
@@ -199,7 +203,7 @@ export async function dispatchRun(
 	// Send dispatch to coordinator
 	const { exitCode, stdout, stderr } = await exec(
 		["ov", "coordinator", "send", "--body", body, "--subject", subject, "--json"],
-		{ cwd: repo.project_root },
+		{ cwd: "." }, // TODO(v0.2.0): use per-run clone dir
 	);
 
 	if (exitCode !== 0) {

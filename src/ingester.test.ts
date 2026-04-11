@@ -5,8 +5,7 @@ import type { ExecResult, GhIssue, RepoConfig } from "./types.ts";
 const testRepo: RepoConfig = {
 	owner: "jayminwest",
 	repo: "overstory",
-	labels: ["agent-ready"],
-	project_root: "/tmp/test-repo",
+	ready_label: "greenhouse:ready",
 };
 
 function makeIssue(overrides?: Partial<GhIssue>): GhIssue {
@@ -104,7 +103,7 @@ describe("ingestIssue", () => {
 		expect(capturedCmd[priIdx + 1]).toBe("0");
 	});
 
-	test("uses repo project_root as cwd", async () => {
+	test("uses cwd for sd create", async () => {
 		let capturedCwd: string | undefined;
 		const exec = async (_cmd: string[], opts?: { cwd?: string }): Promise<ExecResult> => {
 			capturedCwd = opts?.cwd;
@@ -116,7 +115,7 @@ describe("ingestIssue", () => {
 		};
 
 		await ingestIssue(makeIssue(), testRepo, exec);
-		expect(capturedCwd).toBe(testRepo.project_root);
+		expect(capturedCwd).toBe(".");
 	});
 
 	test("throws on sd create failure", async () => {

@@ -45,7 +45,7 @@ function mapLabels(labels: string[]): {
  */
 export async function ingestIssue(
 	issue: GhIssue,
-	repo: RepoConfig,
+	_repo: RepoConfig,
 	exec: ExecFn = defaultExec,
 ): Promise<{ seedsId: string }> {
 	const labelNames = issue.labels.map((l) => l.name);
@@ -67,7 +67,7 @@ export async function ingestIssue(
 			description,
 			"--json",
 		],
-		{ cwd: repo.project_root },
+		{ cwd: "." },
 	);
 
 	if (exitCode !== 0) {

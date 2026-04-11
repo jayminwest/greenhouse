@@ -20,10 +20,8 @@ export async function pollIssues(repo: RepoConfig, exec: ExecFn = defaultExec): 
 		"20",
 	];
 
-	// Add one --label flag per label (gh filters issues matching ALL labels)
-	for (const label of repo.labels) {
-		cmd.push("--label", label);
-	}
+	// Filter by the configured ready label
+	cmd.push("--label", repo.ready_label);
 
 	const { exitCode, stdout, stderr } = await exec(cmd);
 

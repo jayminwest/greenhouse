@@ -10,22 +10,20 @@ import { runDryPoll } from "./poll.ts";
 
 const TEST_DIR = join(import.meta.dir, "__test_poll__");
 
-function makeConfig(projectRoot: string) {
+function makeConfig(stateRoot: string) {
 	return {
 		version: "1",
+		// clone_root parent (stateRoot) is where state.jsonl lives; runs go in stateRoot/runs
+		clone_root: join(stateRoot, "runs"),
 		repos: [
 			{
 				owner: "testorg",
 				repo: "testrepo",
-				labels: ["status:triaged"],
-				project_root: projectRoot,
+				ready_label: "greenhouse:ready",
 			},
 		],
 		poll_interval_minutes: 10,
-		daily_cap: 5,
-		dispatch: {
-			run_timeout_minutes: 60,
-		},
+		run_timeout_minutes: 90,
 	};
 }
 
@@ -132,8 +130,8 @@ describe("runDryPoll", () => {
 		const config = {
 			...makeConfig(TEST_DIR),
 			repos: [
-				{ owner: "org", repo: "repo1", labels: [], project_root: TEST_DIR },
-				{ owner: "org", repo: "repo2", labels: [], project_root: TEST_DIR },
+				{ owner: "org", repo: "repo1", ready_label: "greenhouse:ready" },
+				{ owner: "org", repo: "repo2", ready_label: "greenhouse:ready" },
 			],
 		};
 		const results = await runDryPoll(config, exec);

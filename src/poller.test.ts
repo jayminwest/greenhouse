@@ -5,8 +5,7 @@ import type { ExecResult, GhIssue, RepoConfig } from "./types.ts";
 const testRepo: RepoConfig = {
 	owner: "jayminwest",
 	repo: "overstory",
-	labels: ["agent-ready"],
-	project_root: "/tmp/test-repo",
+	ready_label: "greenhouse:ready",
 };
 
 function makeExec(result: ExecResult) {
@@ -39,10 +38,10 @@ describe("pollIssues", () => {
 		expect(result).toHaveLength(0);
 	});
 
-	test("includes all labels as separate --label flags", async () => {
-		const multiLabelRepo: RepoConfig = {
+	test("passes ready_label as --label flag", async () => {
+		const repoWithLabel: RepoConfig = {
 			...testRepo,
-			labels: ["agent-ready", "approved"],
+			ready_label: "greenhouse:ready",
 		};
 
 		let capturedCmd: string[] = [];
@@ -51,18 +50,17 @@ describe("pollIssues", () => {
 			return { exitCode: 0, stdout: "[]", stderr: "" };
 		};
 
-		await pollIssues(multiLabelRepo, exec);
+		await pollIssues(repoWithLabel, exec);
 
-		// Verify both labels are passed as separate --label flags
+		// Verify ready_label is passed as a --label flag
 		const labelIndexes = capturedCmd.reduce<number[]>((acc, v, i) => {
 			if (v === "--label") acc.push(i);
 			return acc;
 		}, []);
 
-		expect(labelIndexes).toHaveLength(2);
-		const [idx0, idx1] = labelIndexes;
-		expect(capturedCmd[Number(idx0) + 1]).toBe("agent-ready");
-		expect(capturedCmd[Number(idx1) + 1]).toBe("approved");
+		expect(labelIndexes).toHaveLength(1);
+		const [idx0] = labelIndexes;
+		expect(capturedCmd[Number(idx0) + 1]).toBe("greenhouse:ready");
 	});
 
 	test("throws on non-zero exit code", async () => {

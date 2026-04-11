@@ -74,7 +74,6 @@ interface StatusOutput {
 	nextPollIn?: string;
 	config?: {
 		pollIntervalMinutes: number;
-		dailyCap: number;
 		repos: string[];
 	};
 }
@@ -105,22 +104,20 @@ export function registerStatusCommand(program: Command): void {
 			let allRuns: RunState[] = [];
 			let activeRuns: RunState[] = [];
 			if (config) {
-				for (const repo of config.repos) {
-					const repoRuns = await readAllRuns(repo.project_root);
+				for (const _repo of config.repos) {
+					const repoRuns = await readAllRuns("."); // TODO(v0.2.0): use clone_root
 					allRuns = allRuns.concat(repoRuns);
-					const repoActive = await getActiveRuns(repo.project_root);
+					const repoActive = await getActiveRuns("."); // TODO(v0.2.0): use clone_root
 					activeRuns = activeRuns.concat(repoActive);
 				}
 			}
 
-			// Budget
-			const dailyCap = config?.daily_cap ?? 5;
 			// TODO(v0.2.0): budget tracking removed in daemon rewrite
 			const budget = {
 				date: new Date().toISOString().slice(0, 10),
 				dispatched: 0,
-				cap: dailyCap,
-				remaining: dailyCap,
+				cap: 0,
+				remaining: 0,
 			};
 
 			// Next poll
@@ -142,7 +139,6 @@ export function registerStatusCommand(program: Command): void {
 				config: config
 					? {
 							pollIntervalMinutes: config.poll_interval_minutes,
-							dailyCap: config.daily_cap,
 							repos: config.repos.map((r) => `${r.owner}/${r.repo}`),
 						}
 					: undefined,

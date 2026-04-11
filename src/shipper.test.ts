@@ -45,12 +45,11 @@ function makeRun(overrides: Partial<RunState> = {}): RunState {
 	};
 }
 
-function makeRepoConfig(projectRoot: string): RepoConfig {
+function makeRepoConfig(_projectRoot: string): RepoConfig {
 	return {
 		owner: "owner",
 		repo: "repo",
-		labels: ["feature"],
-		project_root: projectRoot,
+		ready_label: "greenhouse:ready",
 	};
 }
 

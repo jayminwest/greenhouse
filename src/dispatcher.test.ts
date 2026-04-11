@@ -11,8 +11,7 @@ import type {
 const testRepo: RepoConfig = {
 	owner: "jayminwest",
 	repo: "overstory",
-	labels: ["agent-ready"],
-	project_root: "/tmp/test-repo",
+	ready_label: "greenhouse:ready",
 };
 
 const testContext: DispatchContext = {

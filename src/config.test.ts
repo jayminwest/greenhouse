@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, parseYaml } from "./config.ts";
 
@@ -23,15 +24,15 @@ function writeConfig(name: string, content: string): string {
 
 describe("parseYaml", () => {
 	test("parses flat key-value pairs", () => {
-		const result = parseYaml(`version: "1"\npoll_interval_minutes: 10\ndaily_cap: 5\n`);
+		const result = parseYaml(`version: "1"\npoll_interval_minutes: 10\nrun_timeout_minutes: 90\n`);
 		expect(result.version).toBe("1");
 		expect(result.poll_interval_minutes).toBe(10);
-		expect(result.daily_cap).toBe(5);
+		expect(result.run_timeout_minutes).toBe(90);
 	});
 
 	test("parses nested objects", () => {
-		const result = parseYaml("dispatch:\n  capability: lead\n  max_concurrent: 2\n");
-		expect(result.dispatch).toEqual({ capability: "lead", max_concurrent: 2 });
+		const result = parseYaml("outer:\n  inner_key: value\n  count: 2\n");
+		expect(result.outer).toEqual({ inner_key: "value", count: 2 });
 	});
 
 	test("parses string arrays", () => {
@@ -41,14 +42,13 @@ describe("parseYaml", () => {
 
 	test("parses object arrays", () => {
 		const yaml =
-			"repos:\n  - owner: jayminwest\n    repo: overstory\n    labels:\n      - agent-ready\n    project_root: /path/to/repo\n";
+			"repos:\n  - owner: jayminwest\n    repo: overstory\n    ready_label: greenhouse:ready\n";
 		const result = parseYaml(yaml);
 		const repos = result.repos as Array<Record<string, unknown>>;
 		expect(repos).toHaveLength(1);
 		expect(repos[0]?.owner).toBe("jayminwest");
 		expect(repos[0]?.repo).toBe("overstory");
-		expect(repos[0]?.labels).toEqual(["agent-ready"]);
-		expect(repos[0]?.project_root).toBe("/path/to/repo");
+		expect(repos[0]?.ready_label).toBe("greenhouse:ready");
 	});
 
 	test("parses block scalar |", () => {
@@ -76,9 +76,7 @@ const MINIMAL_CONFIG = `version: "1"
 repos:
   - owner: jayminwest
     repo: overstory
-    labels:
-      - agent-ready
-    project_root: /path/to/overstory
+    ready_label: "greenhouse:ready"
 `;
 
 describe("loadConfig", () => {
@@ -89,20 +87,52 @@ describe("loadConfig", () => {
 		expect(config.repos).toHaveLength(1);
 		expect(config.repos[0]?.owner).toBe("jayminwest");
 		expect(config.repos[0]?.repo).toBe("overstory");
-		expect(config.repos[0]?.labels).toEqual(["agent-ready"]);
+		expect(config.repos[0]?.ready_label).toBe("greenhouse:ready");
 		// Defaults
 		expect(config.poll_interval_minutes).toBe(10);
-		expect(config.daily_cap).toBe(5);
-		expect(config.dispatch.run_timeout_minutes).toBe(90);
+		expect(config.run_timeout_minutes).toBe(90);
+		expect(config.clone_root).toBe(join(homedir(), ".greenhouse", "runs"));
 	});
 
-	test("overrides defaults with provided values", async () => {
-		const content = `${MINIMAL_CONFIG}poll_interval_minutes: 15\ndaily_cap: 10\ndispatch:\n  run_timeout_minutes: 120\n`;
+	test("loads all new top-level fields", async () => {
+		const content = `version: "1"
+clone_root: /custom/clone/root
+poll_interval_minutes: 15
+run_timeout_minutes: 120
+repos:
+  - owner: jayminwest
+    repo: overstory
+    ready_label: "greenhouse:ready"
+`;
 		const path = writeConfig("config.yaml", content);
 		const config = await loadConfig(path);
+		expect(config.clone_root).toBe("/custom/clone/root");
 		expect(config.poll_interval_minutes).toBe(15);
-		expect(config.daily_cap).toBe(10);
-		expect(config.dispatch.run_timeout_minutes).toBe(120);
+		expect(config.run_timeout_minutes).toBe(120);
+	});
+
+	test("expands ~ in clone_root", async () => {
+		const content = `${MINIMAL_CONFIG}clone_root: ~/.greenhouse/runs\n`;
+		const path = writeConfig("config.yaml", content);
+		const config = await loadConfig(path);
+		expect(config.clone_root).toBe(join(homedir(), ".greenhouse", "runs"));
+	});
+
+	test("loads optional per-repo fields", async () => {
+		const content = `version: "1"
+repos:
+  - owner: jayminwest
+    repo: mulch
+    ready_label: "greenhouse:ready"
+    failed_label: "greenhouse:failed"
+    clone_url: "git@github.com:jayminwest/mulch.git"
+    base_branch: main
+`;
+		const path = writeConfig("config.yaml", content);
+		const config = await loadConfig(path);
+		expect(config.repos[0]?.failed_label).toBe("greenhouse:failed");
+		expect(config.repos[0]?.clone_url).toBe("git@github.com:jayminwest/mulch.git");
+		expect(config.repos[0]?.base_branch).toBe("main");
 	});
 
 	test("throws if config file not found", async () => {
@@ -121,7 +151,7 @@ describe("loadConfig", () => {
 		await expect(loadConfig(path)).rejects.toThrow("`repos` is required");
 	});
 
-	test("throws if repo entry missing required fields", async () => {
+	test("throws if repo entry missing ready_label", async () => {
 		const path = writeConfig(
 			"config.yaml",
 			`version: "1"\nrepos:\n  - owner: jayminwest\n    repo: overstory\n`,
@@ -134,20 +164,61 @@ describe("loadConfig", () => {
 repos:
   - owner: jayminwest
     repo: overstory
-    labels:
-      - agent-ready
-    project_root: /path/to/overstory
+    ready_label: "greenhouse:ready"
   - owner: jayminwest
     repo: seeds
-    labels:
-      - agent-ready
-      - bug
-    project_root: /path/to/seeds
+    ready_label: "greenhouse:ready"
+    failed_label: "greenhouse:failed"
 `;
 		const path = writeConfig("config.yaml", content);
 		const config = await loadConfig(path);
 		expect(config.repos).toHaveLength(2);
 		expect(config.repos[1]?.repo).toBe("seeds");
-		expect(config.repos[1]?.labels).toEqual(["agent-ready", "bug"]);
+		expect(config.repos[1]?.failed_label).toBe("greenhouse:failed");
+	});
+
+	// ─── Legacy field rejection ──────────────────────────────────────────────
+
+	test("rejects legacy top-level: daily_cap", async () => {
+		const content = `${MINIMAL_CONFIG}daily_cap: 5\n`;
+		const path = writeConfig("config.yaml", content);
+		await expect(loadConfig(path)).rejects.toThrow("`daily_cap` was removed in v0.2.0");
+	});
+
+	test("rejects legacy top-level: dispatch", async () => {
+		const content = `${MINIMAL_CONFIG}dispatch:\n  run_timeout_minutes: 90\n`;
+		const path = writeConfig("config.yaml", content);
+		await expect(loadConfig(path)).rejects.toThrow("`dispatch` was removed in v0.2.0");
+	});
+
+	test("rejects legacy top-level: shipping", async () => {
+		const content = `${MINIMAL_CONFIG}shipping:\n  auto_push: true\n`;
+		const path = writeConfig("config.yaml", content);
+		await expect(loadConfig(path)).rejects.toThrow("`shipping` was removed in v0.2.0");
+	});
+
+	test("rejects legacy per-repo: project_root", async () => {
+		const content = `version: "1"
+repos:
+  - owner: jayminwest
+    repo: overstory
+    ready_label: "greenhouse:ready"
+    project_root: /path/to/repo
+`;
+		const path = writeConfig("config.yaml", content);
+		await expect(loadConfig(path)).rejects.toThrow("`project_root` was removed in v0.2.0");
+	});
+
+	test("rejects legacy per-repo: labels array", async () => {
+		const content = `version: "1"
+repos:
+  - owner: jayminwest
+    repo: overstory
+    ready_label: "greenhouse:ready"
+    labels:
+      - agent-ready
+`;
+		const path = writeConfig("config.yaml", content);
+		await expect(loadConfig(path)).rejects.toThrow("`labels` was removed in v0.2.0");
 	});
 });

@@ -46,15 +46,15 @@ export function registerIngestCommand(program: Command): void {
 			const { owner, repo, number } = parsed;
 			const ghRepo = `${owner}/${repo}`;
 
-			// Load config to find project_root; fall back to cwd if repo not configured
+			// Load config to find repo settings; fall back to defaults if repo not configured
 			let repoConfig: RepoConfig;
 			let daemonConfig: DaemonConfig | null = null;
 			try {
 				daemonConfig = await loadConfig(opts.config);
 				const found = daemonConfig.repos.find((r) => r.owner === owner && r.repo === repo);
-				repoConfig = found ?? { owner, repo, labels: [], project_root: process.cwd() };
+				repoConfig = found ?? { owner, repo, ready_label: "greenhouse:ready" };
 			} catch {
-				repoConfig = { owner, repo, labels: [], project_root: process.cwd() };
+				repoConfig = { owner, repo, ready_label: "greenhouse:ready" };
 			}
 
 			// Fetch issue via gh
@@ -91,7 +91,7 @@ export function registerIngestCommand(program: Command): void {
 					discoveredAt: now,
 					updatedAt: now,
 				},
-				repoConfig.project_root,
+				".", // TODO(v0.2.0): use per-run clone dir
 			);
 
 			// Ingest into seeds
@@ -102,7 +102,7 @@ export function registerIngestCommand(program: Command): void {
 				issue.number,
 				ghRepo,
 				{ status: "ingested", seedsId, ingestedAt: new Date().toISOString() },
-				repoConfig.project_root,
+				".", // TODO(v0.2.0): use per-run clone dir
 			);
 
 			// Dispatch agent (manual ingest bypasses daily limits)
@@ -119,7 +119,7 @@ export function registerIngestCommand(program: Command): void {
 					mergeBranch: dispatchResult.mergeBranch,
 					dispatchedAt: new Date().toISOString(),
 				},
-				repoConfig.project_root,
+				".", // TODO(v0.2.0): use per-run clone dir
 			);
 
 			process.stdout.write(

@@ -9,19 +9,16 @@ const TMP = join(import.meta.dir, ".test-daemon-tmp");
 function makeConfig(): DaemonConfig {
 	return {
 		version: "1",
+		clone_root: join(TMP, "runs"),
 		repos: [
 			{
 				owner: "testowner",
 				repo: "testrepo",
-				labels: ["ready"],
-				project_root: TMP,
+				ready_label: "greenhouse:ready",
 			},
 		],
 		poll_interval_minutes: 10,
-		daily_cap: 5,
-		dispatch: {
-			run_timeout_minutes: 60,
-		},
+		run_timeout_minutes: 90,
 	};
 }
 

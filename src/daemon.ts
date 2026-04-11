@@ -59,7 +59,7 @@ async function _performPostShipCleanup(
 		return;
 	}
 
-	const projectRoot = repoConfig.project_root;
+	const projectRoot = "."; // TODO(v0.2.0): use per-run clone dir
 
 	try {
 		// Return to main and delete local merge branch
@@ -118,8 +118,8 @@ export async function runPollCycle(
  */
 export async function getRunsSummary(config: DaemonConfig): Promise<RunState[]> {
 	const allRuns: RunState[] = [];
-	for (const repo of config.repos) {
-		const runs = await readAllRuns(repo.project_root);
+	for (const _repo of config.repos) {
+		const runs = await readAllRuns("."); // TODO(v0.2.0): use clone_root
 		allRuns.push(...runs);
 	}
 	return allRuns;
@@ -132,14 +132,13 @@ export async function getRunsSummary(config: DaemonConfig): Promise<RunState[]> 
  */
 export async function runDaemon(config: DaemonConfig, configPath?: string): Promise<void> {
 	// Initialize log file before first log() call so all startup messages land there.
-	// Use first repo's project_root as cwd heuristic; fall back to cwd if no repos.
-	const logRoot = config.repos[0]?.project_root ?? ".";
+	// Use clone_root parent as log root heuristic; fall back to cwd if unset.
+	const logRoot = config.clone_root ?? ".";
 	await initLogFile(logRoot);
 
 	log("info", "Greenhouse daemon starting", {
 		repos: config.repos.map((r) => `${r.owner}/${r.repo}`),
 		poll_interval_minutes: config.poll_interval_minutes,
-		daily_cap: config.daily_cap,
 	});
 
 	// Write PID file so `grhs status` can detect the daemon in foreground mode.
