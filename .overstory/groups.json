@@ -288,5 +288,15 @@
 		"status": "active",
 		"createdAt": "2026-04-11T18:48:53.572Z",
 		"completedAt": null
+	},
+	{
+		"id": "group-ceb2d914",
+		"name": "v0.2.0-types",
+		"memberIssueIds": [
+			"greenhouse-fcc8"
+		],
+		"status": "active",
+		"createdAt": "2026-04-11T19:17:36.015Z",
+		"completedAt": null
 	}
 ]
