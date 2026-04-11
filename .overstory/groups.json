@@ -263,8 +263,30 @@
 		"memberIssueIds": [
 			"greenhouse-0cc1"
 		],
-		"status": "active",
+		"status": "completed",
 		"createdAt": "2026-04-01T16:36:35.330Z",
+		"completedAt": "2026-04-01T16:51:14.763Z"
+	},
+	{
+		"id": "group-cac603e5",
+		"name": "v0.2.0-batch1",
+		"memberIssueIds": [
+			"greenhouse-5986",
+			"greenhouse-dacc"
+		],
+		"status": "completed",
+		"createdAt": "2026-04-01T16:53:15.017Z",
+		"completedAt": "2026-04-11T18:48:12.401Z"
+	},
+	{
+		"id": "group-19046a74",
+		"name": "v0.2.0-foundation",
+		"memberIssueIds": [
+			"greenhouse-455a",
+			"greenhouse-4e01"
+		],
+		"status": "active",
+		"createdAt": "2026-04-11T18:48:53.572Z",
 		"completedAt": null
 	}
 ]

@@ -3,6 +3,7 @@ domains:
   - greenhouse
   - architecture
   - agents
+  - ecosystem
 governance:
   max_entries: 100
   warn_entries: 150
