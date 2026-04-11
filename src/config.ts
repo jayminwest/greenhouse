@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { DaemonConfig, RepoConfig } from "./types.ts";
-import { CONFIG_FILE, DEFAULT_PR_TEMPLATE, GREENHOUSE_DIR } from "./types.ts";
+import { CONFIG_FILE, GREENHOUSE_DIR } from "./types.ts";
 
 // ─── YAML parser ─────────────────────────────────────────────────────────────
 // Supports: nested objects, string arrays, block scalars (|), booleans, numbers.
@@ -225,14 +225,7 @@ const DEFAULT_CONFIG: Omit<DaemonConfig, "repos" | "version"> = {
 	poll_interval_minutes: 10,
 	daily_cap: 5,
 	dispatch: {
-		capability: "coordinator",
-		max_concurrent: 2,
-		monitor_interval_seconds: 30,
 		run_timeout_minutes: 90,
-	},
-	shipping: {
-		auto_push: true,
-		pr_template: DEFAULT_PR_TEMPLATE,
 	},
 };
 
@@ -268,10 +261,6 @@ function validateConfig(raw: Record<string, unknown>): DaemonConfig {
 		raw.dispatch && typeof raw.dispatch === "object"
 			? (raw.dispatch as Record<string, unknown>)
 			: {};
-	const shipping =
-		raw.shipping && typeof raw.shipping === "object"
-			? (raw.shipping as Record<string, unknown>)
-			: {};
 
 	return {
 		version,
@@ -282,33 +271,10 @@ function validateConfig(raw: Record<string, unknown>): DaemonConfig {
 				: DEFAULT_CONFIG.poll_interval_minutes,
 		daily_cap: typeof raw.daily_cap === "number" ? raw.daily_cap : DEFAULT_CONFIG.daily_cap,
 		dispatch: {
-			capability:
-				typeof dispatch.capability === "string"
-					? dispatch.capability
-					: DEFAULT_CONFIG.dispatch.capability,
-			max_concurrent:
-				typeof dispatch.max_concurrent === "number"
-					? dispatch.max_concurrent
-					: DEFAULT_CONFIG.dispatch.max_concurrent,
-			monitor_interval_seconds:
-				typeof dispatch.monitor_interval_seconds === "number"
-					? dispatch.monitor_interval_seconds
-					: DEFAULT_CONFIG.dispatch.monitor_interval_seconds,
 			run_timeout_minutes:
 				typeof dispatch.run_timeout_minutes === "number"
 					? dispatch.run_timeout_minutes
 					: DEFAULT_CONFIG.dispatch.run_timeout_minutes,
-		},
-		shipping: {
-			auto_push:
-				typeof shipping.auto_push === "boolean"
-					? shipping.auto_push
-					: DEFAULT_CONFIG.shipping.auto_push,
-			pr_template:
-				typeof shipping.pr_template === "string"
-					? shipping.pr_template
-					: DEFAULT_CONFIG.shipping.pr_template,
-			auto_merge: typeof shipping.auto_merge === "boolean" ? shipping.auto_merge : undefined,
 		},
 	};
 }

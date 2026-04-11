@@ -23,7 +23,7 @@ import {
 	setVerboseMode,
 	startTiming,
 } from "./output.ts";
-import type { DailyBudget, RunState } from "./types.ts";
+import type { RunState } from "./types.ts";
 
 function makeRun(overrides: Partial<RunState> = {}): RunState {
 	return {
@@ -39,7 +39,9 @@ function makeRun(overrides: Partial<RunState> = {}): RunState {
 	};
 }
 
-function makeBudget(overrides: Partial<DailyBudget> = {}): DailyBudget {
+function makeBudget(
+	overrides: Partial<{ date: string; dispatched: number; cap: number; remaining: number }> = {},
+) {
 	return {
 		date: "2026-01-01",
 		dispatched: 2,

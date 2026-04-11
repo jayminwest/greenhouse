@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import type { DailyBudget, RunState } from "./types.ts";
+import type { RunState } from "./types.ts";
 
 // === Duration utilities ===
 
@@ -204,7 +204,12 @@ export function printRunFull(run: RunState): void {
 	}
 }
 
-export function printBudget(budget: DailyBudget): void {
+export function printBudget(budget: {
+	date: string;
+	dispatched: number;
+	cap: number;
+	remaining: number;
+}): void {
 	if (_json || _quiet) return;
 	const bar =
 		budget.remaining === 0 ? chalk.red("EXHAUSTED") : brand(`${budget.remaining} remaining`);

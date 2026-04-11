@@ -93,26 +93,16 @@ describe("loadConfig", () => {
 		// Defaults
 		expect(config.poll_interval_minutes).toBe(10);
 		expect(config.daily_cap).toBe(5);
-		expect(config.dispatch.capability).toBe("coordinator");
-		expect(config.dispatch.max_concurrent).toBe(2);
-		expect(config.dispatch.monitor_interval_seconds).toBe(30);
 		expect(config.dispatch.run_timeout_minutes).toBe(90);
-		expect(config.shipping.auto_push).toBe(true);
-		expect(typeof config.shipping.pr_template).toBe("string");
-		expect(config.shipping.pr_template.length).toBeGreaterThan(0);
 	});
 
 	test("overrides defaults with provided values", async () => {
-		const content = `${MINIMAL_CONFIG}poll_interval_minutes: 15\ndaily_cap: 10\ndispatch:\n  capability: specialist\n  max_concurrent: 4\n  monitor_interval_seconds: 60\n  run_timeout_minutes: 120\nshipping:\n  auto_push: false\n`;
+		const content = `${MINIMAL_CONFIG}poll_interval_minutes: 15\ndaily_cap: 10\ndispatch:\n  run_timeout_minutes: 120\n`;
 		const path = writeConfig("config.yaml", content);
 		const config = await loadConfig(path);
 		expect(config.poll_interval_minutes).toBe(15);
 		expect(config.daily_cap).toBe(10);
-		expect(config.dispatch.capability).toBe("specialist");
-		expect(config.dispatch.max_concurrent).toBe(4);
-		expect(config.dispatch.monitor_interval_seconds).toBe(60);
 		expect(config.dispatch.run_timeout_minutes).toBe(120);
-		expect(config.shipping.auto_push).toBe(false);
 	});
 
 	test("throws if config file not found", async () => {

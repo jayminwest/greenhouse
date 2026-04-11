@@ -51,13 +51,6 @@ export function registerConfigCommand(program: Command): void {
 				process.stdout.write(`    project_root: ${repo.project_root}\n`);
 			}
 			process.stdout.write(`\ndispatch:\n`);
-			process.stdout.write(`  capability: ${config.dispatch.capability}\n`);
-			process.stdout.write(`  max_concurrent: ${config.dispatch.max_concurrent}\n`);
-			process.stdout.write(
-				`  monitor_interval_seconds: ${config.dispatch.monitor_interval_seconds}\n`,
-			);
 			process.stdout.write(`  run_timeout_minutes: ${config.dispatch.run_timeout_minutes}\n`);
-			process.stdout.write(`\nshipping:\n`);
-			process.stdout.write(`  auto_push: ${config.shipping.auto_push}\n`);
 		});
 }

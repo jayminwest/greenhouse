@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ShipOptions } from "./shipper.ts";
 import { cleanupAfterShip, recoverAgentBranches, runPreflight, shipRun } from "./shipper.ts";
-import type { DaemonConfig, ExecFn, ExecResult, RepoConfig, RunState } from "./types.ts";
+import type { ExecFn, ExecResult, RepoConfig, RunState } from "./types.ts";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -53,24 +54,11 @@ function makeRepoConfig(projectRoot: string): RepoConfig {
 	};
 }
 
-function makeConfig(overrides: Partial<DaemonConfig["shipping"]> = {}): DaemonConfig {
+function makeShipOpts(overrides: Partial<ShipOptions> = {}): ShipOptions {
 	return {
-		version: "1",
-		repos: [],
-		poll_interval_minutes: 10,
-		daily_cap: 5,
-		dispatch: {
-			capability: "lead",
-			max_concurrent: 2,
-			monitor_interval_seconds: 30,
-			run_timeout_minutes: 60,
-		},
-		shipping: {
-			auto_push: true,
-			pr_template:
-				"## Greenhouse Auto-PR\n\nCloses #{github_issue_number}\n\n**Seeds Task:** {seeds_task_id}\n\n### Summary\n{agent_summary}",
-			...overrides,
-		},
+		prTemplate:
+			"## Greenhouse Auto-PR\n\nCloses #{github_issue_number}\n\n**Seeds Task:** {seeds_task_id}\n\n### Summary\n{agent_summary}",
+		...overrides,
 	};
 }
 
@@ -240,7 +228,7 @@ describe("shipRun", () => {
 		const run = makeRun({ mergeBranch: undefined });
 		const exec = makeExec({});
 
-		await expect(shipRun(run, makeRepoConfig(projectRoot), makeConfig(), exec)).rejects.toThrow(
+		await expect(shipRun(run, makeRepoConfig(projectRoot), makeShipOpts(), exec)).rejects.toThrow(
 			"no merge branch",
 		);
 	});
@@ -254,7 +242,7 @@ describe("shipRun", () => {
 			"bun run typecheck": ok(),
 		});
 
-		await expect(shipRun(run, makeRepoConfig(projectRoot), makeConfig(), exec)).rejects.toThrow(
+		await expect(shipRun(run, makeRepoConfig(projectRoot), makeShipOpts(), exec)).rejects.toThrow(
 			"Pre-flight checks failed",
 		);
 	});
@@ -285,7 +273,7 @@ describe("shipRun", () => {
 			return ok();
 		};
 
-		const result = await shipRun(run, makeRepoConfig(projectRoot), makeConfig(), exec);
+		const result = await shipRun(run, makeRepoConfig(projectRoot), makeShipOpts(), exec);
 		expect(result.prUrl).toBe("https://github.com/owner/repo/pull/99");
 		expect(result.prNumber).toBe(99);
 
@@ -326,7 +314,7 @@ describe("shipRun", () => {
 			return ok();
 		};
 
-		await shipRun(run, makeRepoConfig(projectRoot), makeConfig({ auto_merge: true }), exec);
+		await shipRun(run, makeRepoConfig(projectRoot), makeShipOpts({ autoMerge: true }), exec);
 
 		const mergeCmd = commands.find(
 			(c) => c.includes("gh") && c.includes("pr") && c.includes("merge"),
@@ -353,7 +341,7 @@ describe("shipRun", () => {
 			return ok();
 		};
 
-		await shipRun(run, makeRepoConfig(projectRoot), makeConfig({ auto_merge: false }), exec);
+		await shipRun(run, makeRepoConfig(projectRoot), makeShipOpts({ autoMerge: false }), exec);
 
 		const mergeCmd = commands.find(
 			(c) => c.includes("gh") && c.includes("pr") && c.includes("merge"),
@@ -376,7 +364,7 @@ describe("shipRun", () => {
 			return ok();
 		};
 
-		await expect(shipRun(run, makeRepoConfig(projectRoot), makeConfig(), exec)).rejects.toThrow(
+		await expect(shipRun(run, makeRepoConfig(projectRoot), makeShipOpts(), exec)).rejects.toThrow(
 			"gh pr create failed",
 		);
 	});

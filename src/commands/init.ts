@@ -19,30 +19,7 @@ poll_interval_minutes: 10
 daily_cap: 5
 
 dispatch:
-  capability: coordinator
-  max_concurrent: 2
-  monitor_interval_seconds: 30
   run_timeout_minutes: 90
-
-shipping:
-  auto_push: true
-  pr_template: |
-    ## Greenhouse Auto-PR
-
-    Closes #{github_issue_number}
-
-    **Seeds Task:** {seeds_task_id}
-
-    ### Summary
-    {agent_summary}
-
-    ### Quality Gates
-    - [ ] Tests pass
-    - [ ] Lint clean
-    - [ ] Typecheck clean
-
-    ---
-    Automated by [Greenhouse](https://github.com/jayminwest/greenhouse)
 `;
 
 const GITIGNORE_CONTENT = `daemon.pid
